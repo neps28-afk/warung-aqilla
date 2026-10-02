@@ -716,39 +716,45 @@
             </div>
           </aside>
 
-          {/* Mobile Bottom Navigation Bar - Strictly excludes 'Pengaturan Toko' */}
-          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-40 flex justify-around p-1 shadow-2xl">
-            <button onClick={() => switchTab('pos')} className={`flex flex-col items-center justify-center p-2 w-full rounded-lg ${activeTab === 'pos' ? 'text-emerald-400' : 'text-slate-400'}`}>
-              <i className="fas fa-shopping-cart text-lg"></i>
-              <span className="text-[10px] mt-1 font-medium">Kasir</span>
+          {}
+          {/* Mobile Bottom Navigation Bar - Includes 'Pengaturan Toko' when Admin */}
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-40 flex justify-around p-1 shadow-2xl overflow-x-auto">
+            <button onClick={() => switchTab('pos')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'pos' ? 'text-emerald-400' : 'text-slate-400'}`}>
+              <i className="fas fa-shopping-cart text-base"></i>
+              <span className="text-[9px] mt-0.5 font-medium">Kasir</span>
             </button>
             {isAdminLoggedIn && (
               <>
-                <button onClick={() => switchTab('pending')} className={`flex flex-col items-center justify-center p-2 w-full rounded-lg relative ${activeTab === 'pending' ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  <i className="fas fa-clock text-lg text-amber-400"></i>
-                  <span className="text-[10px] mt-1 font-medium">Pending WA</span>
-                  <span className="absolute top-1 right-2 px-1.5 py-0.2 bg-amber-500 text-slate-900 rounded-full text-[9px] font-black">{pendingCount}</span>
+                <button onClick={() => switchTab('pending')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg relative ${activeTab === 'pending' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  <i className="fas fa-clock text-base text-amber-400"></i>
+                  <span className="text-[9px] mt-0.5 font-medium">Pending</span>
+                  <span className="absolute top-0.5 right-1 px-1 py-0.1 bg-amber-500 text-slate-900 rounded-full text-[8px] font-black">{pendingCount}</span>
                 </button>
-                <button onClick={() => switchTab('products')} className={`flex flex-col items-center justify-center p-2 w-full rounded-lg ${activeTab === 'products' ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  <i className="fas fa-boxes-stacked text-lg"></i>
-                  <span className="text-[10px] mt-1 font-medium">Produk</span>
+                <button onClick={() => switchTab('products')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'products' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  <i className="fas fa-boxes-stacked text-base"></i>
+                  <span className="text-[9px] mt-0.5 font-medium">Produk</span>
                 </button>
-                <button onClick={() => switchTab('opname')} className={`flex flex-col items-center justify-center p-2 w-full rounded-lg ${activeTab === 'opname' ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  <i className="fas fa-clipboard-check text-lg"></i>
-                  <span className="text-[10px] mt-1 font-medium">Opname</span>
+                <button onClick={() => switchTab('opname')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'opname' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  <i className="fas fa-clipboard-check text-base"></i>
+                  <span className="text-[9px] mt-0.5 font-medium">Opname</span>
                 </button>
-                <button onClick={() => switchTab('history')} className={`flex flex-col items-center justify-center p-2 w-full rounded-lg ${activeTab === 'history' ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  <i className="fas fa-receipt text-lg"></i>
-                  <span className="text-[10px] mt-1 font-medium">Riwayat</span>
+                <button onClick={() => switchTab('history')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'history' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  <i className="fas fa-receipt text-base"></i>
+                  <span className="text-[9px] mt-0.5 font-medium">Riwayat</span>
                 </button>
-                <button onClick={() => switchTab('reports')} className={`flex flex-col items-center justify-center p-2 w-full rounded-lg ${activeTab === 'reports' ? 'text-emerald-400' : 'text-slate-400'}`}>
-                  <i className="fas fa-chart-pie text-lg"></i>
-                  <span className="text-[10px] mt-1 font-medium">Laporan</span>
+                <button onClick={() => switchTab('reports')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'reports' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  <i className="fas fa-chart-pie text-base"></i>
+                  <span className="text-[9px] mt-0.5 font-medium">Laporan</span>
+                </button>
+                <button onClick={() => switchTab('settings')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'settings' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  <i className="fas fa-sliders text-base"></i>
+                  <span className="text-[9px] mt-0.5 font-medium">Setelan</span>
                 </button>
               </>
             )}
           </nav>
 
+          {}
           {/* Main Viewport */}
           <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
             
@@ -767,6 +773,7 @@
 
             <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
 
+              {}
               {/* TAB 1: KASIR POS */}
               {activeTab === 'pos' && (
                 <div className="h-full flex flex-col lg:flex-row gap-5">
@@ -1508,6 +1515,7 @@
             </div>
           </main>
 
+          {}
           {/* Modal Login Admin */}
           {isLoginModalOpen && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1546,10 +1554,6 @@
                       placeholder="••••••••"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
                     />
-                  </div>
-                  <div className="p-2.5 bg-amber-50 border border-amber-200/80 rounded-xl flex items-center gap-2 text-amber-800 text-xs">
-                    <i className="fas fa-info-circle text-amber-600 shrink-0"></i>
-                    <span>Default: User <b>admin</b> & Pass <b>admin123</b></span>
                   </div>
                   <button type="submit" className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md flex items-center justify-center gap-2">
                     <i className="fas fa-right-to-bracket"></i>
