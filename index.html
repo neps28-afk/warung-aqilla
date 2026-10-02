@@ -1961,7 +1961,6 @@
                       required
                       value={loginInput.username}
                       onChange={(e) => setLoginInput({ ...loginInput, username: e.target.value })}
-                      placeholder="admin"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
                     />
                   </div>
@@ -1972,13 +1971,8 @@
                       required
                       value={loginInput.password}
                       onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })}
-                      placeholder="••••••••"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
                     />
-                  </div>
-                  <div className="p-2.5 bg-amber-50 border border-amber-200/80 rounded-xl flex items-center gap-2 text-amber-800 text-xs">
-                    <i className="fas fa-info-circle text-amber-600 shrink-0"></i>
-                    <span>Default: User <b>admin</b> & Pass <b>admin123</b></span>
                   </div>
                   <button type="submit" className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md flex items-center justify-center gap-2">
                     <i className="fas fa-right-to-bracket"></i>
