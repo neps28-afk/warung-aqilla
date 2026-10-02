@@ -56,22 +56,34 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // Firebase Config Fallback
+    // =========================================================================
+    // KUNCI FIREBASE RESMI WARUNG AQILLA:
+    // =========================================================================
     const firebaseConfig = {
-      apiKey: "demo-api-key",
+      apiKey: "AIzaSyDVQOo1XmfacvFbCO5TW_RJ21vg270oii0",
       authDomain: "warung-aqilla.firebaseapp.com",
       projectId: "warung-aqilla",
-      storageBucket: "warung-aqilla.appspot.com",
-      messagingSenderId: "123456789012",
-      appId: "1:123456789012:web:demo"
+      storageBucket: "warung-aqilla.firebasestorage.app",
+      messagingSenderId: "766735283911",
+      appId: "1:766735283911:web:628f8fc7b3747a193630e2",
+      measurementId: "G-QQVWKBK541"
     };
 
-    if (!firebase.apps.length) {
-      try {
+    let isFirebaseReady = false;
+    let db = null;
+    let auth = null;
+
+    try {
+      if (!firebase.apps.length) {
         firebase.initializeApp(firebaseConfig);
-      } catch (e) {
-        console.warn("Firebase config fallback loaded in standalone mode");
       }
+      db = firebase.firestore();
+      auth = firebase.auth();
+      if (firebaseConfig.apiKey !== "demo-api-key") {
+        isFirebaseReady = true;
+      }
+    } catch (e) {
+      console.warn("Firebase running in Local Fallback mode");
     }
 
     // Default Storage Seeds
@@ -102,7 +114,7 @@
     };
 
     function App() {
-      // LocalStorage State Initializers
+      // LocalStorage initializers fallback
       const [products, setProducts] = useState(() => {
         const saved = localStorage.getItem('wa_products');
         return saved ? JSON.parse(saved) : DEFAULT_PRODUCTS;
@@ -128,7 +140,6 @@
         return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
       });
 
-      // Opname Logs History
       const [opnameLogs, setOpnameLogs] = useState(() => {
         const saved = localStorage.getItem('wa_opname_logs');
         return saved ? JSON.parse(saved) : [];
@@ -146,20 +157,20 @@
       const [posSearch, setPosSearch] = useState('');
       const [productSearch, setProductSearch] = useState('');
 
-      // Display Limit Filters (5, 20, 50, 100, semua)
+      // Display Limit Filters
       const [prodLimit, setProdLimit] = useState('20');
       const [opnameLimit, setOpnameLimit] = useState('20');
       const [historyLimit, setHistoryLimit] = useState('20');
       const [topProdLimit, setTopProdLimit] = useState('5');
 
       // Period Filters for Opname, History & Financial Reports
-      const [opnameSubTab, setOpnameSubTab] = useState('input'); // 'input' | 'logs'
+      const [opnameSubTab, setOpnameSubTab] = useState('input');
       const [opnameMonthFilter, setOpnameMonthFilter] = useState('Semua');
       const [historyMonthFilter, setHistoryMonthFilter] = useState('Semua');
       
       const currentYearStr = new Date().getFullYear().toString();
       const currentMonthStr = new Date().toISOString().slice(0, 7);
-      const [reportPeriodType, setReportPeriodType] = useState('all'); // 'all' | 'monthly' | 'yearly'
+      const [reportPeriodType, setReportPeriodType] = useState('all');
       const [reportSelectedMonth, setReportSelectedMonth] = useState(currentMonthStr);
       const [reportSelectedYear, setReportSelectedYear] = useState(currentYearStr);
 
@@ -192,7 +203,79 @@
       // Toast Notification
       const [toast, setToast] = useState({ show: false, message: '', isError: false });
 
-      // Save changes to LocalStorage
+      // =========================================================================
+      // REAL-TIME CLOUD FIRESTORE SYNCHRONIZATION LISTENERS (LINTAS HP)
+      // =========================================================================
+      useEffect(() => {
+        if (!isFirebaseReady || !db || !auth) return;
+
+        auth.signInAnonymously().catch(err => console.warn("Anon Auth Error:", err));
+
+        // Listener 1: Products
+        const unsubProducts = db.collection('products').onSnapshot(snap => {
+          if (!snap.empty) {
+            const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setProducts(list);
+          } else {
+            DEFAULT_PRODUCTS.forEach(p => db.collection('products').doc(p.id).set(p));
+          }
+        });
+
+        // Listener 2: Categories
+        const unsubCategories = db.collection('categories').onSnapshot(snap => {
+          if (!snap.empty) {
+            const cats = snap.docs.map(doc => doc.data().name);
+            setCategories(cats);
+          } else {
+            DEFAULT_CATEGORIES.forEach(c => db.collection('categories').doc(c).set({ name: c }));
+          }
+        });
+
+        // Listener 3: Transactions
+        const unsubTx = db.collection('transactions').onSnapshot(snap => {
+          const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          list.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setTransactions(list);
+        });
+
+        // Listener 4: Settings
+        const unsubSettings = db.collection('settings').doc('store_settings').onSnapshot(doc => {
+          if (doc.exists) {
+            setSettings(doc.data());
+            setSettingsForm(doc.data());
+          } else {
+            db.collection('settings').doc('store_settings').set(DEFAULT_SETTINGS);
+          }
+        });
+
+        // Listener 5: Admin Users
+        const unsubAdmins = db.collection('admins').onSnapshot(snap => {
+          if (!snap.empty) {
+            const admins = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setAdminUsers(admins);
+          } else {
+            DEFAULT_ADMINS.forEach(a => db.collection('admins').doc(a.id).set(a));
+          }
+        });
+
+        // Listener 6: Opname Logs
+        const unsubOpname = db.collection('opname_logs').onSnapshot(snap => {
+          const logs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          logs.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setOpnameLogs(logs);
+        });
+
+        return () => {
+          unsubProducts();
+          unsubCategories();
+          unsubTx();
+          unsubSettings();
+          unsubAdmins();
+          unsubOpname();
+        };
+      }, []);
+
+      // LocalStorage Backup Fallback
       useEffect(() => { localStorage.setItem('wa_products', JSON.stringify(products)); }, [products]);
       useEffect(() => { localStorage.setItem('wa_categories', JSON.stringify(categories)); }, [categories]);
       useEffect(() => { localStorage.setItem('wa_transactions', JSON.stringify(transactions)); }, [transactions]);
@@ -309,14 +392,19 @@
         const totalBuyPrice = cart.reduce((sum, item) => sum + (item.buyPrice * item.qty), 0);
         const profit = totalPrice - totalBuyPrice;
 
-        // Deduct stock
-        setProducts(products.map(p => {
+        // Deduct stock in Firestore & local
+        const updatedProducts = products.map(p => {
           const cartItem = cart.find(c => c.id === p.id);
           if (cartItem) {
-            return { ...p, stock: Math.max(0, p.stock - cartItem.qty) };
+            const newStk = Math.max(0, p.stock - cartItem.qty);
+            if (isFirebaseReady && db) {
+              db.collection('products').doc(p.id).update({ stock: newStk });
+            }
+            return { ...p, stock: newStk };
           }
           return p;
-        }));
+        });
+        setProducts(updatedProducts);
 
         const txId = 'TRX-' + Date.now().toString().slice(-6);
         const newTx = {
@@ -333,9 +421,13 @@
           status: 'Belum Bayar'
         };
 
-        setTransactions([newTx, ...transactions]);
+        if (isFirebaseReady && db) {
+          db.collection('transactions').doc(txId).set(newTx);
+        } else {
+          setTransactions([newTx, ...transactions]);
+        }
 
-        // Build WhatsApp text and automatically convert Indonesian numbers (08xxx -> 628xxx)
+        // WhatsApp redirect
         let storePhone = settings.phone ? settings.phone.replace(/[^0-9]/g, '') : '';
         if (storePhone.startsWith('0')) {
           storePhone = '62' + storePhone.slice(1);
@@ -406,17 +498,26 @@
               changeAmount,
               date: new Date().toISOString()
             };
-            setTransactions(transactions.map(t => t.id === tx.id ? tx : t));
+            if (isFirebaseReady && db) {
+              db.collection('transactions').doc(tx.id).set(tx);
+            } else {
+              setTransactions(transactions.map(t => t.id === tx.id ? tx : t));
+            }
           }
         } else {
-          // Deduct stock for new sales
-          setProducts(products.map(p => {
+          // Deduct stock
+          const updatedProducts = products.map(p => {
             const cartItem = cart.find(c => c.id === p.id);
             if (cartItem) {
-              return { ...p, stock: Math.max(0, p.stock - cartItem.qty) };
+              const newStk = Math.max(0, p.stock - cartItem.qty);
+              if (isFirebaseReady && db) {
+                db.collection('products').doc(p.id).update({ stock: newStk });
+              }
+              return { ...p, stock: newStk };
             }
             return p;
-          }));
+          });
+          setProducts(updatedProducts);
 
           tx = {
             id: 'TRX-' + Date.now().toString().slice(-6),
@@ -431,7 +532,11 @@
             changeAmount,
             status: 'Lunas'
           };
-          setTransactions([tx, ...transactions]);
+          if (isFirebaseReady && db) {
+            db.collection('transactions').doc(tx.id).set(tx);
+          } else {
+            setTransactions([tx, ...transactions]);
+          }
         }
 
         clearCart();
@@ -459,15 +564,24 @@
         if (!tx) return;
 
         // Restore stock
-        setProducts(products.map(p => {
+        const updatedProducts = products.map(p => {
           const item = tx.items.find(i => i.id === p.id);
           if (item) {
-            return { ...p, stock: p.stock + item.qty };
+            const restored = p.stock + item.qty;
+            if (isFirebaseReady && db) {
+              db.collection('products').doc(p.id).update({ stock: restored });
+            }
+            return { ...p, stock: restored };
           }
           return p;
-        }));
+        });
+        setProducts(updatedProducts);
 
-        setTransactions(transactions.filter(t => t.id !== txId));
+        if (isFirebaseReady && db) {
+          db.collection('transactions').doc(txId).delete();
+        } else {
+          setTransactions(transactions.filter(t => t.id !== txId));
+        }
         showToast(`Pesanan ${txId} dibatalkan dan stok dikembalikan.`);
       };
 
@@ -478,16 +592,29 @@
       const executeDelete = () => {
         const { type, id } = deleteModal;
         if (type === 'transaction') {
-          setTransactions(transactions.filter(t => t.id !== id));
+          if (isFirebaseReady && db) {
+            db.collection('transactions').doc(id).delete();
+          } else {
+            setTransactions(transactions.filter(t => t.id !== id));
+          }
           showToast('Riwayat transaksi berhasil dihapus.');
         } else if (type === 'product') {
-          setProducts(products.filter(p => p.id !== id));
+          if (isFirebaseReady && db) {
+            db.collection('products').doc(id).delete();
+          } else {
+            setProducts(products.filter(p => p.id !== id));
+          }
           showToast('Produk berhasil dihapus.');
         } else if (type === 'admin') {
           if (adminUsers.length <= 1) {
             showToast('Minimal harus ada 1 akun admin!', true);
           } else {
-            setAdminUsers(adminUsers.filter((_, i) => i !== id));
+            const adminToDelete = adminUsers[id];
+            if (isFirebaseReady && db && adminToDelete?.id) {
+              db.collection('admins').doc(adminToDelete.id).delete();
+            } else {
+              setAdminUsers(adminUsers.filter((_, i) => i !== id));
+            }
             showToast('Akun admin berhasil dihapus.');
           }
         }
@@ -507,10 +634,14 @@
         const prodId = editingProd ? editingProd.id : Date.now().toString();
         const prodObj = { id: prodId, sku, name, category, buyPrice, sellPrice, stock };
 
-        if (editingProd) {
-          setProducts(products.map(p => p.id === prodId ? prodObj : p));
+        if (isFirebaseReady && db) {
+          db.collection('products').doc(prodId).set(prodObj);
         } else {
-          setProducts([...products, prodObj]);
+          if (editingProd) {
+            setProducts(products.map(p => p.id === prodId ? prodObj : p));
+          } else {
+            setProducts([...products, prodObj]);
+          }
         }
 
         setIsProductModalOpen(false);
@@ -524,7 +655,13 @@
         const qty = parseInt(restockQty) || 0;
         if (qty <= 0) return;
 
-        setProducts(products.map(p => p.id === restockProd.id ? { ...p, stock: p.stock + qty } : p));
+        const newStk = restockProd.stock + qty;
+        if (isFirebaseReady && db) {
+          db.collection('products').doc(restockProd.id).update({ stock: newStk });
+        } else {
+          setProducts(products.map(p => p.id === restockProd.id ? { ...p, stock: newStk } : p));
+        }
+
         setIsRestockModalOpen(false);
         setRestockProd(null);
         setRestockQty('');
@@ -540,7 +677,12 @@
           return;
         }
 
-        setCategories([...categories, val]);
+        if (isFirebaseReady && db) {
+          db.collection('categories').doc(val).set({ name: val });
+        } else {
+          setCategories([...categories, val]);
+        }
+
         setNewCatInput('');
         showToast(`Jenis "${val}" berhasil ditambahkan!`);
       };
@@ -550,7 +692,11 @@
           showToast('Minimal harus ada 1 jenis produk!', true);
           return;
         }
-        setCategories(categories.filter(c => c !== catName));
+        if (isFirebaseReady && db) {
+          db.collection('categories').doc(catName).delete();
+        } else {
+          setCategories(categories.filter(c => c !== catName));
+        }
         showToast(`Jenis "${catName}" telah dihapus.`);
       };
 
@@ -575,21 +721,30 @@
             note: noteVal
           });
 
+          if (isFirebaseReady && db) {
+            db.collection('products').doc(p.id).update({ stock: physVal });
+          }
+
           return { ...p, stock: physVal };
         });
 
-        // Store Opname Log with Date & Month before updating system stock
         const now = new Date();
+        const logId = 'OPN-' + Date.now().toString().slice(-6);
         const newLog = {
-          id: 'OPN-' + Date.now().toString().slice(-6),
+          id: logId,
           date: now.toISOString(),
-          monthYear: now.toISOString().slice(0, 7), // YYYY-MM
+          monthYear: now.toISOString().slice(0, 7),
           totalAdjustedItems: count,
           items: adjustedDetails
         };
 
-        setOpnameLogs([newLog, ...opnameLogs]);
-        setProducts(updatedProducts);
+        if (isFirebaseReady && db) {
+          db.collection('opname_logs').doc(logId).set(newLog);
+        } else {
+          setOpnameLogs([newLog, ...opnameLogs]);
+          setProducts(updatedProducts);
+        }
+
         setOpnamePhysical({});
         setOpnameNotes({});
         showToast(`Stok opname berhasil disimpan & dicatat ke arsip bulanan (${count} item disesuaikan)!`);
@@ -597,7 +752,11 @@
 
       const handleSaveSettings = (e) => {
         e.preventDefault();
-        setSettings(settingsForm);
+        if (isFirebaseReady && db) {
+          db.collection('settings').doc('store_settings').set(settingsForm);
+        } else {
+          setSettings(settingsForm);
+        }
         showToast('Pengaturan Toko Berhasil Disimpan!');
       };
 
@@ -610,13 +769,23 @@
 
         let updatedAdmins;
         if (adminForm.index >= 0) {
-          updatedAdmins = adminUsers.map((u, i) => i === adminForm.index ? { ...u, username: adminForm.username.trim(), password: adminForm.password.trim() } : u);
+          const target = adminUsers[adminForm.index];
+          const updatedObj = { ...target, username: adminForm.username.trim(), password: adminForm.password.trim() };
+          if (isFirebaseReady && db && target?.id) {
+            db.collection('admins').doc(target.id).set(updatedObj);
+          } else {
+            updatedAdmins = adminUsers.map((u, i) => i === adminForm.index ? updatedObj : u);
+            setAdminUsers(updatedAdmins);
+          }
         } else {
           const newAdminObj = { id: 'admin-' + Date.now(), username: adminForm.username.trim(), password: adminForm.password.trim() };
-          updatedAdmins = [...adminUsers, newAdminObj];
+          if (isFirebaseReady && db) {
+            db.collection('admins').doc(newAdminObj.id).set(newAdminObj);
+          } else {
+            setAdminUsers([...adminUsers, newAdminObj]);
+          }
         }
 
-        setAdminUsers(updatedAdmins);
         setAdminForm({ index: -1, username: '', password: '' });
         showToast('Akun Admin berhasil diperbarui!');
       };
@@ -647,7 +816,6 @@
         
         let totalStockValue = products.reduce((sum, p) => sum + ((p.buyPrice || 0) * (p.stock || 0)), 0);
 
-        // On yearly report mode: default stock modal value to 0 if starting a new year or viewing a different year
         if (reportPeriodType === 'yearly') {
           const currentYearStr = new Date().getFullYear().toString();
           if (reportSelectedYear !== currentYearStr || paidTxs.length === 0) {
@@ -787,8 +955,7 @@
             </div>
           </aside>
 
-          {}
-          {/* Mobile Bottom Navigation Bar - Includes 'Pengaturan Toko' when Admin */}
+          {/* Mobile Bottom Navigation Bar */}
           <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-40 flex justify-around p-1 shadow-2xl overflow-x-auto">
             <button onClick={() => switchTab('pos')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'pos' ? 'text-emerald-400' : 'text-slate-400'}`}>
               <i className="fas fa-shopping-cart text-base"></i>
@@ -825,7 +992,6 @@
             )}
           </nav>
 
-          {}
           {/* Main Viewport */}
           <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
             
@@ -844,7 +1010,6 @@
 
             <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
 
-              {}
               {/* TAB 1: KASIR POS */}
               {activeTab === 'pos' && (
                 <div className="h-full flex flex-col lg:flex-row gap-5">
@@ -920,7 +1085,7 @@
                     </div>
                   </div>
 
-                  {/* Keranjang Belanja dengan Scroll Terbatas */}
+                  {/* Keranjang Belanja */}
                   <div className="w-full lg:w-96 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col shrink-0">
                     <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                       <div className="flex items-center gap-2">
@@ -932,7 +1097,6 @@
                       </span>
                     </div>
 
-                    {/* Restricted Height Scrollable Box (~5 items max height) */}
                     <div className="max-h-[280px] overflow-y-auto py-3 space-y-2 pr-1">
                       {cart.length === 0 ? (
                         <div className="py-8 text-center text-slate-400">
@@ -1282,7 +1446,6 @@
                         </table>
                       </div>
                       
-                      {}
                       <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
                         <span className="text-xs text-slate-500">Periksa kembali penyesuaian stok sebelum menyimpan ke sistem & arsip.</span>
                         <button onClick={saveStockOpname} className="w-full sm:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center justify-center gap-2 transition-all">
@@ -1601,7 +1764,7 @@
                 </div>
               )}
 
-              {/* TAB 7: PENGATURAN TOKO & AKUN ADMIN (2 KOLOM SEJAJAR) */}
+              {/* TAB 7: PENGATURAN TOKO & AKUN ADMIN */}
               {activeTab === 'settings' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200">
@@ -1764,7 +1927,6 @@
             </div>
           </main>
 
-          {}
           {/* Modal Login Admin */}
           {isLoginModalOpen && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1789,6 +1951,7 @@
                       required
                       value={loginInput.username}
                       onChange={(e) => setLoginInput({ ...loginInput, username: e.target.value })}
+                      placeholder="admin"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
                     />
                   </div>
@@ -1799,8 +1962,13 @@
                       required
                       value={loginInput.password}
                       onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })}
+                      placeholder="••••••••"
                       className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
                     />
+                  </div>
+                  <div className="p-2.5 bg-amber-50 border border-amber-200/80 rounded-xl flex items-center gap-2 text-amber-800 text-xs">
+                    <i className="fas fa-info-circle text-amber-600 shrink-0"></i>
+                    <span>Default: User <b>admin</b> & Pass <b>admin123</b></span>
                   </div>
                   <button type="submit" className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md flex items-center justify-center gap-2">
                     <i className="fas fa-right-to-bracket"></i>
