@@ -54,7 +54,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo } = React;
 
     // Firebase Config Fallback
     const firebaseConfig = {
@@ -140,6 +140,12 @@
       const [posSearch, setPosSearch] = useState('');
       const [productSearch, setProductSearch] = useState('');
 
+      // Display Limit Filters (5, 20, 50, 100, semua)
+      const [prodLimit, setProdLimit] = useState('20');
+      const [opnameLimit, setOpnameLimit] = useState('20');
+      const [historyLimit, setHistoryLimit] = useState('20');
+      const [topProdLimit, setTopProdLimit] = useState('5');
+
       // Modals
       const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
       const [isPayModalOpen, setIsPayModalOpen] = useState(false);
@@ -147,6 +153,7 @@
       const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
       const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
       const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+      const [deleteModal, setDeleteModal] = useState({ open: false, type: '', id: '', title: '' });
 
       // Forms & Selections
       const [loginInput, setLoginInput] = useState({ username: '', password: '' });
@@ -441,6 +448,29 @@
         showToast(`Pesanan ${txId} dibatalkan dan stok dikembalikan.`);
       };
 
+      const promptConfirmDelete = (type, id, title) => {
+        setDeleteModal({ open: true, type, id, title });
+      };
+
+      const executeDelete = () => {
+        const { type, id } = deleteModal;
+        if (type === 'transaction') {
+          setTransactions(transactions.filter(t => t.id !== id));
+          showToast('Riwayat transaksi berhasil dihapus.');
+        } else if (type === 'product') {
+          setProducts(products.filter(p => p.id !== id));
+          showToast('Produk berhasil dihapus.');
+        } else if (type === 'admin') {
+          if (adminUsers.length <= 1) {
+            showToast('Minimal harus ada 1 akun admin!', true);
+          } else {
+            setAdminUsers(adminUsers.filter((_, i) => i !== id));
+            showToast('Akun admin berhasil dihapus.');
+          }
+        }
+        setDeleteModal({ open: false, type: '', id: '', title: '' });
+      };
+
       const handleSaveProduct = (e) => {
         e.preventDefault();
         const formEl = e.target;
@@ -463,12 +493,6 @@
         setIsProductModalOpen(false);
         setEditingProd(null);
         showToast(editingProd ? 'Produk berhasil diperbarui!' : 'Produk baru berhasil ditambahkan!');
-      };
-
-      const handleDeleteProduct = (prodId) => {
-        if (!window.confirm('Apakah Anda yakin ingin menghapus produk ini?')) return;
-        setProducts(products.filter(p => p.id !== prodId));
-        showToast('Produk berhasil dihapus.');
       };
 
       const handleSaveRestock = (e) => {
@@ -551,15 +575,6 @@
         showToast('Akun Admin berhasil diperbarui!');
       };
 
-      const handleDeleteAdminAccount = (idx) => {
-        if (adminUsers.length <= 1) {
-          showToast('Minimal harus ada 1 akun admin!', true);
-          return;
-        }
-        setAdminUsers(adminUsers.filter((_, i) => i !== idx));
-        showToast('Akun admin berhasil dihapus.');
-      };
-
       const pendingCount = useMemo(() => transactions.filter(t => t.status === 'Belum Bayar').length, [transactions]);
       const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0), [cart]);
 
@@ -582,8 +597,7 @@
 
         const topProducts = Object.entries(productSales)
           .map(([name, data]) => ({ name, ...data }))
-          .sort((a, b) => b.qty - a.qty)
-          .slice(0, 5);
+          .sort((a, b) => b.qty - a.qty);
 
         return { totalRevenue, totalProfit, paidCount: paidTxs.length, totalStockValue, topProducts };
       }, [transactions, products]);
@@ -702,7 +716,7 @@
             </div>
           </aside>
 
-          {/* Mobile Bottom Navigation Bar */}
+          {/* Mobile Bottom Navigation Bar - Strictly excludes 'Pengaturan Toko' */}
           <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-40 flex justify-around p-1 shadow-2xl">
             <button onClick={() => switchTab('pos')} className={`flex flex-col items-center justify-center p-2 w-full rounded-lg ${activeTab === 'pos' ? 'text-emerald-400' : 'text-slate-400'}`}>
               <i className="fas fa-shopping-cart text-lg"></i>
@@ -828,7 +842,7 @@
                     </div>
                   </div>
 
-                  {/* Keranjang Belanja */}
+                  {/* Keranjang Belanja dengan Scroll Terbatas */}
                   <div className="w-full lg:w-96 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col shrink-0">
                     <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                       <div className="flex items-center gap-2">
@@ -840,6 +854,7 @@
                       </span>
                     </div>
 
+                    {/* Restricted Height Scrollable Box (~5 items max height) */}
                     <div className="max-h-[280px] overflow-y-auto py-3 space-y-2 pr-1">
                       {cart.length === 0 ? (
                         <div className="py-8 text-center text-slate-400">
@@ -1021,14 +1036,28 @@
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="p-4 border-b border-slate-100">
+                    <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
                       <input
                         type="text"
                         value={productSearch}
                         onChange={(e) => setProductSearch(e.target.value)}
                         placeholder="Cari produk berdasarkan SKU atau Nama..."
-                        className="w-full max-w-sm px-3.5 py-2 border border-slate-200 rounded-xl text-xs"
+                        className="w-full sm:w-80 px-3.5 py-2 border border-slate-200 rounded-xl text-xs"
                       />
+                      <div className="flex items-center gap-2 justify-end">
+                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
+                        <select
+                          value={prodLimit}
+                          onChange={(e) => setProdLimit(e.target.value)}
+                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
+                        >
+                          <option value="5">5</option>
+                          <option value="20">20</option>
+                          <option value="50">50</option>
+                          <option value="100">100</option>
+                          <option value="semua">Semua</option>
+                        </select>
+                      </div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs text-slate-600">
@@ -1044,7 +1073,9 @@
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
+                          {products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku.toLowerCase().includes(productSearch.toLowerCase()))
+                            .slice(0, prodLimit === 'semua' ? undefined : parseInt(prodLimit))
+                            .map(p => (
                             <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                               <td className="p-4 font-mono font-bold text-slate-700">{p.sku}</td>
                               <td className="p-4 font-bold text-slate-800">{p.name}</td>
@@ -1064,7 +1095,7 @@
                                   <button onClick={() => { setEditingProd(p); setIsProductModalOpen(true); }} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold" title="Edit Produk">
                                     <i className="fas fa-pen"></i>
                                   </button>
-                                  <button onClick={() => handleDeleteProduct(p.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Produk">
+                                  <button onClick={() => promptConfirmDelete('product', p.id, p.name)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Produk">
                                     <i className="fas fa-trash"></i>
                                   </button>
                                 </div>
@@ -1092,6 +1123,23 @@
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+                      <span className="text-xs font-bold text-slate-700">Daftar Item Stok Opname</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
+                        <select
+                          value={opnameLimit}
+                          onChange={(e) => setOpnameLimit(e.target.value)}
+                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
+                        >
+                          <option value="5">5</option>
+                          <option value="20">20</option>
+                          <option value="50">50</option>
+                          <option value="100">100</option>
+                          <option value="semua">Semua</option>
+                        </select>
+                      </div>
+                    </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs text-slate-600">
                         <thead className="bg-slate-50 border-b border-slate-200 uppercase font-bold text-slate-500">
@@ -1105,7 +1153,7 @@
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {products.map((p, idx) => {
+                          {products.slice(0, opnameLimit === 'semua' ? undefined : parseInt(opnameLimit)).map((p, idx) => {
                             const physVal = opnamePhysical[idx] !== undefined ? opnamePhysical[idx] : p.stock;
                             const diff = physVal - p.stock;
 
@@ -1150,6 +1198,23 @@
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+                      <span className="text-xs font-bold text-slate-700">Daftar Transaksi</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
+                        <select
+                          value={historyLimit}
+                          onChange={(e) => setHistoryLimit(e.target.value)}
+                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
+                        >
+                          <option value="5">5</option>
+                          <option value="20">20</option>
+                          <option value="50">50</option>
+                          <option value="100">100</option>
+                          <option value="semua">Semua</option>
+                        </select>
+                      </div>
+                    </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs text-slate-600">
                         <thead className="bg-slate-50 border-b border-slate-200 uppercase font-bold text-slate-500">
@@ -1159,14 +1224,14 @@
                             <th className="p-4 text-center">Jumlah Item</th>
                             <th className="p-4 text-right">Total Transaksi</th>
                             <th className="p-4 text-center">Pembayaran</th>
-                            <th className="p-4 text-center">Cetak Struk</th>
+                            <th className="p-4 text-center">Aksi / Struk</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {transactions.length === 0 ? (
                             <tr><td colSpan="6" className="p-8 text-center text-slate-400">Belum ada riwayat transaksi penjualan.</td></tr>
                           ) : (
-                            transactions.map(tx => {
+                            transactions.slice(0, historyLimit === 'semua' ? undefined : parseInt(historyLimit)).map(tx => {
                               const dateStr = new Date(tx.date).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
                               const totalItems = tx.items.reduce((s, i) => s + i.qty, 0);
                               const isPending = tx.status === 'Belum Bayar';
@@ -1186,15 +1251,20 @@
                                     </span>
                                   </td>
                                   <td className="p-4 text-center">
-                                    {isPending ? (
-                                      <button onClick={() => processPendingPayment(tx.id)} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg font-bold text-xs">
-                                        <i className="fas fa-credit-card"></i> Pelunasan
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      {isPending ? (
+                                        <button onClick={() => processPendingPayment(tx.id)} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg font-bold text-xs">
+                                          <i className="fas fa-credit-card"></i> Pelunasan
+                                        </button>
+                                      ) : (
+                                        <button onClick={() => { setCurrentTxToPrint(tx); setIsReceiptModalOpen(true); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-xs flex items-center justify-center gap-1">
+                                          <i className="fas fa-print"></i> Struk
+                                        </button>
+                                      )}
+                                      <button onClick={() => promptConfirmDelete('transaction', tx.id, tx.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Transaksi">
+                                        <i className="fas fa-trash"></i>
                                       </button>
-                                    ) : (
-                                      <button onClick={() => { setCurrentTxToPrint(tx); setIsReceiptModalOpen(true); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-xs flex items-center justify-center gap-1 mx-auto">
-                                        <i className="fas fa-print"></i> Struk
-                                      </button>
-                                    )}
+                                    </div>
                                   </td>
                                 </tr>
                               );
@@ -1235,12 +1305,30 @@
                   </div>
 
                   <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <h3 className="font-bold text-slate-800 text-sm mb-3">Produk Terlaris</h3>
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
+                      <h3 className="font-bold text-slate-800 text-sm">Produk Terlaris</h3>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
+                        <select
+                          value={topProdLimit}
+                          onChange={(e) => setTopProdLimit(e.target.value)}
+                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
+                        >
+                          <option value="5">5</option>
+                          <option value="20">20</option>
+                          <option value="50">50</option>
+                          <option value="100">100</option>
+                          <option value="semua">Semua</option>
+                        </select>
+                      </div>
+                    </div>
                     <div className="space-y-2">
                       {financialStats.topProducts.length === 0 ? (
                         <p className="text-xs text-slate-400 py-2">Belum ada data penjualan lunas.</p>
                       ) : (
-                        financialStats.topProducts.map((p, idx) => (
+                        financialStats.topProducts
+                          .slice(0, topProdLimit === 'semua' ? undefined : parseInt(topProdLimit))
+                          .map((p, idx) => (
                           <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs">
                             <div className="flex items-center gap-2.5">
                               <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[10px]">{idx + 1}</span>
@@ -1258,7 +1346,7 @@
                 </div>
               )}
 
-              {/* TAB 7: PENGATURAN TOKO & AKUN ADMIN (DISEJAJARKAN 2 KOLOM) */}
+              {/* TAB 7: PENGATURAN TOKO & AKUN ADMIN (2 KOLOM SEJAJAR) */}
               {activeTab === 'settings' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200">
@@ -1400,7 +1488,7 @@
                                         <i className="fas fa-pen"></i>
                                       </button>
                                       {adminUsers.length > 1 && (
-                                        <button onClick={() => handleDeleteAdminAccount(idx)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Admin">
+                                        <button onClick={() => promptConfirmDelete('admin', idx, u.username)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Admin">
                                           <i className="fas fa-trash"></i>
                                         </button>
                                       )}
@@ -1664,6 +1752,31 @@
             </div>
           )}
 
+          {/* Modal Konfirmasi Hapus UI Custom */}
+          {deleteModal.open && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-xs w-full overflow-hidden shadow-2xl p-5 text-center space-y-4">
+                <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto text-xl">
+                  <i className="fas fa-exclamation-triangle"></i>
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base">Konfirmasi Hapus</h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Apakah Anda yakin ingin menghapus <b>{deleteModal.title}</b>? Tindakan ini tidak dapat dibatalkan.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setDeleteModal({ open: false, type: '', id: '', title: '' })} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">
+                    Batal
+                  </button>
+                  <button onClick={executeDelete} className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md">
+                    Ya, Hapus
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Modal Struk Thermal */}
           {isReceiptModalOpen && currentTxToPrint && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1733,7 +1846,7 @@
             </div>
           )}
 
-          {/* Target Cetak Struk Printer Thermal Hidden */}
+          {/* Element Struk Thermal Tersembunyi untuk Window Print */}
           {currentTxToPrint && (
             <div id="printable-thermal-receipt" className="hidden">
               <div style={{ width: settings.paperWidth === '80mm' ? '76mm' : '54mm', margin: '0 auto', padding: '8px', fontFamily: 'monospace', fontSize: '11px', lineHeight: '1.2' }}>
