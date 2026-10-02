@@ -128,6 +128,12 @@
         return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
       });
 
+      // Opname Logs History
+      const [opnameLogs, setOpnameLogs] = useState(() => {
+        const saved = localStorage.getItem('wa_opname_logs');
+        return saved ? JSON.parse(saved) : [];
+      });
+
       // Interactive UI State
       const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
       const [activeTab, setActiveTab] = useState('pos');
@@ -145,6 +151,17 @@
       const [opnameLimit, setOpnameLimit] = useState('20');
       const [historyLimit, setHistoryLimit] = useState('20');
       const [topProdLimit, setTopProdLimit] = useState('5');
+
+      // Period Filters for Opname, History & Financial Reports
+      const [opnameSubTab, setOpnameSubTab] = useState('input'); // 'input' | 'logs'
+      const [opnameMonthFilter, setOpnameMonthFilter] = useState('Semua');
+      const [historyMonthFilter, setHistoryMonthFilter] = useState('Semua');
+      
+      const currentYearStr = new Date().getFullYear().toString();
+      const currentMonthStr = new Date().toISOString().slice(0, 7);
+      const [reportPeriodType, setReportPeriodType] = useState('all'); // 'all' | 'monthly' | 'yearly'
+      const [reportSelectedMonth, setReportSelectedMonth] = useState(currentMonthStr);
+      const [reportSelectedYear, setReportSelectedYear] = useState(currentYearStr);
 
       // Modals
       const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -168,6 +185,7 @@
 
       // Opname & Settings Forms
       const [opnamePhysical, setOpnamePhysical] = useState({});
+      const [opnameNotes, setOpnameNotes] = useState({});
       const [adminForm, setAdminForm] = useState({ index: -1, username: '', password: '' });
       const [settingsForm, setSettingsForm] = useState(settings);
 
@@ -180,6 +198,7 @@
       useEffect(() => { localStorage.setItem('wa_transactions', JSON.stringify(transactions)); }, [transactions]);
       useEffect(() => { localStorage.setItem('wa_admins', JSON.stringify(adminUsers)); }, [adminUsers]);
       useEffect(() => { localStorage.setItem('wa_settings', JSON.stringify(settings)); }, [settings]);
+      useEffect(() => { localStorage.setItem('wa_opname_logs', JSON.stringify(opnameLogs)); }, [opnameLogs]);
 
       const showToast = (message, isError = false) => {
         setToast({ show: true, message, isError });
@@ -537,20 +556,43 @@
 
       const saveStockOpname = () => {
         let count = 0;
+        const adjustedDetails = [];
+
         const updatedProducts = products.map((p, idx) => {
-          if (opnamePhysical[idx] !== undefined && opnamePhysical[idx] !== p.stock) {
-            count++;
-            return { ...p, stock: opnamePhysical[idx] };
-          }
-          return p;
+          const physVal = opnamePhysical[idx] !== undefined ? opnamePhysical[idx] : p.stock;
+          const noteVal = opnameNotes[idx] || '';
+          const diff = physVal - p.stock;
+          if (diff !== 0 || noteVal.trim() !== '') count++;
+
+          adjustedDetails.push({
+            id: p.id,
+            sku: p.sku,
+            name: p.name,
+            category: p.category,
+            systemStock: p.stock,
+            physicalStock: physVal,
+            diff,
+            note: noteVal
+          });
+
+          return { ...p, stock: physVal };
         });
 
-        if (count > 0) {
-          setProducts(updatedProducts);
-          showToast(`Penyesuaian stok opname (${count} item) berhasil disimpan!`);
-        } else {
-          showToast('Tidak ada perubahan stok opname.');
-        }
+        // Store Opname Log with Date & Month before updating system stock
+        const now = new Date();
+        const newLog = {
+          id: 'OPN-' + Date.now().toString().slice(-6),
+          date: now.toISOString(),
+          monthYear: now.toISOString().slice(0, 7), // YYYY-MM
+          totalAdjustedItems: count,
+          items: adjustedDetails
+        };
+
+        setOpnameLogs([newLog, ...opnameLogs]);
+        setProducts(updatedProducts);
+        setOpnamePhysical({});
+        setOpnameNotes({});
+        showToast(`Stok opname berhasil disimpan & dicatat ke arsip bulanan (${count} item disesuaikan)!`);
       };
 
       const handleSaveSettings = (e) => {
@@ -583,10 +625,35 @@
       const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0), [cart]);
 
       const financialStats = useMemo(() => {
-        const paidTxs = transactions.filter(t => t.status !== 'Belum Bayar');
+        const paidTxs = transactions.filter(t => {
+          if (t.status === 'Belum Bayar') return false;
+          const txDate = new Date(t.date);
+          if (isNaN(txDate.getTime())) return false;
+
+          const txYearStr = txDate.getFullYear().toString();
+          const txMonthStr = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}`;
+
+          if (reportPeriodType === 'monthly') {
+            return txMonthStr === reportSelectedMonth;
+          }
+          if (reportPeriodType === 'yearly') {
+            return txYearStr === reportSelectedYear;
+          }
+          return true;
+        });
+
         const totalRevenue = paidTxs.reduce((sum, tx) => sum + (tx.totalPrice || 0), 0);
         const totalProfit = paidTxs.reduce((sum, tx) => sum + (tx.profit || 0), 0);
-        const totalStockValue = products.reduce((sum, p) => sum + ((p.buyPrice || 0) * (p.stock || 0)), 0);
+        
+        let totalStockValue = products.reduce((sum, p) => sum + ((p.buyPrice || 0) * (p.stock || 0)), 0);
+
+        // On yearly report mode: default stock modal value to 0 if starting a new year or viewing a different year
+        if (reportPeriodType === 'yearly') {
+          const currentYearStr = new Date().getFullYear().toString();
+          if (reportSelectedYear !== currentYearStr || paidTxs.length === 0) {
+            totalStockValue = 0;
+          }
+        }
 
         const productSales = {};
         paidTxs.forEach(tx => {
@@ -604,7 +671,7 @@
           .sort((a, b) => b.qty - a.qty);
 
         return { totalRevenue, totalProfit, paidCount: paidTxs.length, totalStockValue, topProducts };
-      }, [transactions, products]);
+      }, [transactions, products, reportPeriodType, reportSelectedMonth, reportSelectedYear]);
 
       const printThermalReceipt = () => {
         window.print();
@@ -1123,80 +1190,195 @@
               {/* TAB 4: STOK OPNAME */}
               {activeTab === 'opname' && isAdminLoggedIn && (
                 <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3">
                     <div>
                       <h2 className="font-bold text-lg text-slate-800">Stok Opname</h2>
-                      <p className="text-xs text-slate-500">Sesuaikan jumlah stok barang fisik dengan catatan sistem.</p>
+                      <p className="text-xs text-slate-500">Sesuaikan jumlah stok barang fisik dengan catatan sistem dan simpan arsip rekap bulanan.</p>
                     </div>
-                    <button onClick={saveStockOpname} className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-2">
-                      <i className="fas fa-save"></i> Simpan Penyesuaian Stok
-                    </button>
+                    <div className="flex gap-2 pt-1 border-t border-slate-100">
+                      <button
+                        onClick={() => setOpnameSubTab('input')}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${opnameSubTab === 'input' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      >
+                        <i className="fas fa-edit mr-1.5"></i>Input Opname Live
+                      </button>
+                      <button
+                        onClick={() => setOpnameSubTab('logs')}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${opnameSubTab === 'logs' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      >
+                        <i className="fas fa-history mr-1.5"></i>Arsip Opname Bulanan
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-700">Daftar Item Stok Opname</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
-                        <select
-                          value={opnameLimit}
-                          onChange={(e) => setOpnameLimit(e.target.value)}
-                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
-                        >
-                          <option value="5">5</option>
-                          <option value="20">20</option>
-                          <option value="50">50</option>
-                          <option value="100">100</option>
-                          <option value="semua">Semua</option>
-                        </select>
+                  {opnameSubTab === 'input' ? (
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                      <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+                        <span className="text-xs font-bold text-slate-700">Form Penyesuaian Stok Fisik</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
+                          <select
+                            value={opnameLimit}
+                            onChange={(e) => setOpnameLimit(e.target.value)}
+                            className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
+                          >
+                            <option value="5">5</option>
+                            <option value="20">20</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                            <option value="semua">Semua</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs text-slate-600">
+                          <thead className="bg-slate-50 border-b border-slate-200 uppercase font-bold text-slate-500">
+                            <tr>
+                              <th className="p-4">SKU</th>
+                              <th className="p-4">Nama Produk</th>
+                              <th className="p-4 text-center">Stok Sistem</th>
+                              <th className="p-4 text-center">Stok Fisik</th>
+                              <th className="p-4 text-center">Selisih</th>
+                              <th className="p-4">Keterangan</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {products.slice(0, opnameLimit === 'semua' ? undefined : parseInt(opnameLimit)).map((p, idx) => {
+                              const physVal = opnamePhysical[idx] !== undefined ? opnamePhysical[idx] : p.stock;
+                              const diff = physVal - p.stock;
+
+                              return (
+                                <tr key={p.id} className="hover:bg-slate-50">
+                                  <td className="p-4 font-mono font-bold text-slate-700">{p.sku}</td>
+                                  <td className="p-4 font-bold text-slate-800">{p.name}</td>
+                                  <td className="p-4 text-center font-bold text-slate-700">{p.stock} pcs</td>
+                                  <td className="p-4 text-center">
+                                    <input
+                                      type="number"
+                                      value={physVal}
+                                      min="0"
+                                      onChange={(e) => setOpnamePhysical({ ...opnamePhysical, [idx]: parseInt(e.target.value) || 0 })}
+                                      className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-center font-bold focus:ring-2 focus:ring-emerald-500/20"
+                                    />
+                                  </td>
+                                  <td className="p-4 text-center font-bold">
+                                    <span className={diff > 0 ? 'text-emerald-600' : diff < 0 ? 'text-rose-600' : 'text-slate-400'}>
+                                      {diff > 0 ? `+${diff}` : `${diff}`}
+                                    </span>
+                                  </td>
+                                  <td className="p-4">
+                                    <input
+                                      type="text"
+                                      value={opnameNotes[idx] || ''}
+                                      onChange={(e) => setOpnameNotes({ ...opnameNotes, [idx]: e.target.value })}
+                                      placeholder="Catatan selisih..."
+                                      className="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-xs"
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      
+                      {}
+                      <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <span className="text-xs text-slate-500">Periksa kembali penyesuaian stok sebelum menyimpan ke sistem & arsip.</span>
+                        <button onClick={saveStockOpname} className="w-full sm:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center justify-center gap-2 transition-all">
+                          <i className="fas fa-save"></i>
+                          <span>Simpan Penyesuaian Stok Fisik</span>
+                        </button>
                       </div>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs text-slate-600">
-                        <thead className="bg-slate-50 border-b border-slate-200 uppercase font-bold text-slate-500">
-                          <tr>
-                            <th className="p-4">SKU</th>
-                            <th className="p-4">Nama Produk</th>
-                            <th className="p-4 text-center">Stok Sistem</th>
-                            <th className="p-4 text-center">Stok Fisik</th>
-                            <th className="p-4 text-center">Selisih</th>
-                            <th className="p-4">Keterangan</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {products.slice(0, opnameLimit === 'semua' ? undefined : parseInt(opnameLimit)).map((p, idx) => {
-                            const physVal = opnamePhysical[idx] !== undefined ? opnamePhysical[idx] : p.stock;
-                            const diff = physVal - p.stock;
+                  ) : (
+                    <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4 shadow-sm">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-100">
+                        <div>
+                          <h3 className="font-bold text-slate-800 text-sm">Riwayat Arsip Opname Bulanan</h3>
+                          <p className="text-[11px] text-slate-500">Arsip terbaru ditampilkan paling depan. Geser ke kanan / kiri untuk melihat arsip terdahulu.</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Filter Bulan:</span>
+                          <input
+                            type="month"
+                            value={opnameMonthFilter === 'Semua' ? '' : opnameMonthFilter}
+                            onChange={(e) => setOpnameMonthFilter(e.target.value || 'Semua')}
+                            className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
+                          />
+                          {opnameMonthFilter !== 'Semua' && (
+                            <button onClick={() => setOpnameMonthFilter('Semua')} className="text-xs text-emerald-600 font-bold hover:underline">
+                              Tampilkan Semua
+                            </button>
+                          )}
+                        </div>
+                      </div>
 
-                            return (
-                              <tr key={p.id} className="hover:bg-slate-50">
-                                <td className="p-4 font-mono font-bold text-slate-700">{p.sku}</td>
-                                <td className="p-4 font-bold text-slate-800">{p.name}</td>
-                                <td className="p-4 text-center font-bold text-slate-700">{p.stock} pcs</td>
-                                <td className="p-4 text-center">
-                                  <input
-                                    type="number"
-                                    value={physVal}
-                                    min="0"
-                                    onChange={(e) => setOpnamePhysical({ ...opnamePhysical, [idx]: parseInt(e.target.value) || 0 })}
-                                    className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-center font-bold focus:ring-2 focus:ring-emerald-500/20"
-                                  />
-                                </td>
-                                <td className="p-4 text-center font-bold">
-                                  <span className={diff > 0 ? 'text-emerald-600' : diff < 0 ? 'text-rose-600' : 'text-slate-400'}>
-                                    {diff > 0 ? `+${diff}` : `${diff}`}
+                      {opnameLogs.filter(log => opnameMonthFilter === 'Semua' || log.monthYear === opnameMonthFilter).length === 0 ? (
+                        <div className="py-12 text-center text-slate-400">
+                          <i className="fas fa-box-open text-4xl mb-2 text-slate-300"></i>
+                          <p className="text-xs font-bold">Belum ada arsip opname untuk periode ini</p>
+                          <p className="text-[11px]">Lakukan simpan opname pada tab 'Input Opname Live' untuk mencatat arsip baru.</p>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 pt-1 px-1 scrollbar-thin">
+                            {opnameLogs.filter(log => opnameMonthFilter === 'Semua' || log.monthYear === opnameMonthFilter).map((log, logIdx) => (
+                              <div key={log.id} className="min-w-[88%] sm:min-w-[480px] shrink-0 snap-center border border-slate-200 rounded-2xl p-4 space-y-3 bg-slate-50/80 shadow-sm relative">
+                                <div className="flex justify-between items-center text-xs pb-2 border-b border-slate-200/80">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-bold text-slate-800">{log.id}</span>
+                                    {logIdx === 0 && (
+                                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-md text-[10px] flex items-center gap-1">
+                                        <i className="fas fa-star text-[9px]"></i> Terbaru
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-slate-500">{new Date(log.date).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-xs">
+                                  <span className="text-slate-600 font-medium">Total Disesuaikan:</span>
+                                  <span className="px-2.5 py-0.5 bg-slate-200 text-slate-800 font-bold rounded-full text-[10px]">
+                                    {log.totalAdjustedItems} Item
                                   </span>
-                                </td>
-                                <td className="p-4">
-                                  <input type="text" placeholder="Catatan selisih..." className="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-xs" />
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                </div>
+                                <div className="overflow-x-auto max-h-60 overflow-y-auto rounded-xl border border-slate-200/80">
+                                  <table className="w-full text-left text-[11px] bg-white">
+                                    <thead className="bg-slate-100 text-slate-500 font-bold uppercase sticky top-0">
+                                      <tr>
+                                        <th className="p-2">SKU / Produk</th>
+                                        <th className="p-2 text-center">Sistem</th>
+                                        <th className="p-2 text-center">Fisik</th>
+                                        <th className="p-2 text-center">Selisih</th>
+                                        <th className="p-2">Catatan</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {log.items.map((item, i) => (
+                                        <tr key={i}>
+                                          <td className="p-2 font-bold text-slate-800">{item.name} <span className="text-[10px] text-slate-400 font-mono">({item.sku})</span></td>
+                                          <td className="p-2 text-center text-slate-600">{item.systemStock}</td>
+                                          <td className="p-2 text-center font-bold text-slate-800">{item.physicalStock}</td>
+                                          <td className={`p-2 text-center font-bold ${item.diff > 0 ? 'text-emerald-600' : item.diff < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                                            {item.diff > 0 ? `+${item.diff}` : item.diff}
+                                          </td>
+                                          <td className="p-2 text-slate-600">{item.note || '-'}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="text-center text-[11px] text-slate-400 font-medium pt-1 flex items-center justify-center gap-1">
+                            <i className="fas fa-arrows-left-right text-emerald-600"></i>
+                            <span>Geser ke kanan / kiri untuk melihat arsip opname lainnya</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -1209,8 +1391,21 @@
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-700">Daftar Transaksi</span>
+                    <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Filter Bulan:</span>
+                        <input
+                          type="month"
+                          value={historyMonthFilter === 'Semua' ? '' : historyMonthFilter}
+                          onChange={(e) => setHistoryMonthFilter(e.target.value || 'Semua')}
+                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
+                        />
+                        {historyMonthFilter !== 'Semua' && (
+                          <button onClick={() => setHistoryMonthFilter('Semua')} className="text-xs text-emerald-600 font-bold hover:underline">
+                            Semua Bulan
+                          </button>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
                         <select
@@ -1239,10 +1434,13 @@
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {transactions.length === 0 ? (
-                            <tr><td colSpan="6" className="p-8 text-center text-slate-400">Belum ada riwayat transaksi penjualan.</td></tr>
+                          {transactions.filter(tx => historyMonthFilter === 'Semua' || tx.date.startsWith(historyMonthFilter)).length === 0 ? (
+                            <tr><td colSpan="6" className="p-8 text-center text-slate-400">Belum ada riwayat transaksi penjualan pada periode ini.</td></tr>
                           ) : (
-                            transactions.slice(0, historyLimit === 'semua' ? undefined : parseInt(historyLimit)).map(tx => {
+                            transactions
+                              .filter(tx => historyMonthFilter === 'Semua' || tx.date.startsWith(historyMonthFilter))
+                              .slice(0, historyLimit === 'semua' ? undefined : parseInt(historyLimit))
+                              .map(tx => {
                               const dateStr = new Date(tx.date).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
                               const totalItems = tx.items.reduce((s, i) => s + i.qty, 0);
                               const isPending = tx.status === 'Belum Bayar';
@@ -1291,9 +1489,55 @@
               {/* TAB 6: LAPORAN KEUANGAN */}
               {activeTab === 'reports' && isAdminLoggedIn && (
                 <div className="space-y-4">
-                  <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                    <h2 className="font-bold text-lg text-slate-800">Laporan Keuangan & Stok</h2>
-                    <p className="text-xs text-slate-500">Ringkasan estimasi omset, laba bersih, dan nilai total stok barang.</p>
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div>
+                      <h2 className="font-bold text-lg text-slate-800">Laporan Keuangan & Stok</h2>
+                      <p className="text-xs text-slate-500">Ringkasan estimasi omset, laba bersih, dan nilai total stok barang per periode.</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                        <button
+                          onClick={() => setReportPeriodType('all')}
+                          className={`px-3 py-1.5 rounded-lg transition-all ${reportPeriodType === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                          Semua Waktu
+                        </button>
+                        <button
+                          onClick={() => setReportPeriodType('monthly')}
+                          className={`px-3 py-1.5 rounded-lg transition-all ${reportPeriodType === 'monthly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                          Laporan Bulanan
+                        </button>
+                        <button
+                          onClick={() => setReportPeriodType('yearly')}
+                          className={`px-3 py-1.5 rounded-lg transition-all ${reportPeriodType === 'yearly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        >
+                          Laporan Tahunan
+                        </button>
+                      </div>
+
+                      {reportPeriodType === 'monthly' && (
+                        <input
+                          type="month"
+                          value={reportSelectedMonth}
+                          onChange={(e) => setReportSelectedMonth(e.target.value)}
+                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
+                        />
+                      )}
+
+                      {reportPeriodType === 'yearly' && (
+                        <select
+                          value={reportSelectedYear}
+                          onChange={(e) => setReportSelectedYear(e.target.value)}
+                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
+                        >
+                          {['2024', '2025', '2026', '2027'].map(yr => (
+                            <option key={yr} value={yr}>Tahun {yr}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -1317,7 +1561,7 @@
 
                   <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
-                      <h3 className="font-bold text-slate-800 text-sm">Produk Terlaris</h3>
+                      <h3 className="font-bold text-slate-800 text-sm">Produk Terlaris Periode Ini</h3>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
                         <select
@@ -1335,7 +1579,7 @@
                     </div>
                     <div className="space-y-2">
                       {financialStats.topProducts.length === 0 ? (
-                        <p className="text-xs text-slate-400 py-2">Belum ada data penjualan lunas.</p>
+                        <p className="text-xs text-slate-400 py-2">Belum ada data penjualan lunas pada periode ini.</p>
                       ) : (
                         financialStats.topProducts
                           .slice(0, topProdLimit === 'semua' ? undefined : parseInt(topProdLimit))
@@ -1377,6 +1621,16 @@
                       </div>
 
                       <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Nama Toko / Warung</label>
+                        <input
+                          type="text"
+                          required
+                          value={settingsForm.name}
+                          onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })}
+                          className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
+                        />
+                      </div>
+                      <div>
                         <label className="block text-xs font-semibold text-slate-700 mb-1">No. Telepon / WhatsApp (Format Indonesia: 08xx / 628xx)</label>
                         <input
                           type="text"
@@ -1394,16 +1648,6 @@
                           required
                           value={settingsForm.address}
                           onChange={(e) => setSettingsForm({ ...settingsForm, address: e.target.value })}
-                          className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">No. Telepon / WhatsApp</label>
-                        <input
-                          type="text"
-                          required
-                          value={settingsForm.phone}
-                          onChange={(e) => setSettingsForm({ ...settingsForm, phone: e.target.value })}
                           className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
                         />
                       </div>
