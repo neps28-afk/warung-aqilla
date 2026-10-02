@@ -1,0 +1,768 @@
+```md
+```md
+```md
+```md
+```md
+```md
+```md
+```md
+```md
+```md
+```md
+```md
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Warung Aqilla - POS & Kasir</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  
+  <!-- React & ReactDOM UMD CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel Standalone for JSX in Browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    @media print {
+      body > *:not(#printable-thermal-receipt) {
+        display: none !important;
+      }
+      #printable-thermal-receipt, #printable-thermal-receipt * {
+        display: block !important;
+        visibility: visible !important;
+      }
+      #printable-thermal-receipt {
+        display: block !important;
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: white !important;
+        color: black !important;
+      }
+      @page { margin: 0; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 font-sans antialiased text-slate-800">
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module">
+    import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+    import { getAuth, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
+    import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+
+    const { useState, useEffect, useMemo } = React;
+
+    // Firebase Config Fallback
+    const firebaseConfig = window.FIREBASE_CONFIG || {
+      apiKey: "AIzaSy_GANTI_DENGAN_API_KEY_ANDA",
+      authDomain: "warung-aqilla-pos.firebaseapp.com",
+      projectId: "warung-aqilla-pos",
+      storageBucket: "warung-aqilla-pos.appspot.com",
+      messagingSenderId: "123456789012",
+      appId: "1:123456789012:web:demo"
+    };
+
+    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = 'warung-aqilla-pos';
+
+    const DEFAULT_PRODUCTS = [
+      { id: '1', sku: 'PRD-001', name: 'Beras Premium 5kg', category: 'Sembako', buyPrice: 60000, sellPrice: 68000, stock: 15 },
+      { id: '2', sku: 'PRD-002', name: 'Minyak Goreng 2L', category: 'Sembako', buyPrice: 28000, sellPrice: 32000, stock: 20 },
+      { id: '3', sku: 'PRD-003', name: 'Gula Pasir 1kg', category: 'Sembako', buyPrice: 14000, sellPrice: 16000, stock: 25 },
+      { id: '4', sku: 'PRD-004', name: 'Telur Ayam 1kg', category: 'Sembako', buyPrice: 26000, sellPrice: 29000, stock: 30 },
+      { id: '5', sku: 'PRD-005', name: 'Kopi Kapal Api 165g', category: 'Minuman', buyPrice: 12000, sellPrice: 14500, stock: 18 },
+      { id: '6', sku: 'PRD-006', name: 'Teh Celup Sariwangi', category: 'Minuman', buyPrice: 6500, sellPrice: 8000, stock: 40 },
+      { id: '7', sku: 'PRD-007', name: 'Mie Goreng Indomie', category: 'Makanan', buyPrice: 2800, sellPrice: 3500, stock: 100 },
+      { id: '8', sku: 'PRD-008', name: 'Susu Kental Manis', category: 'Minuman', buyPrice: 10000, sellPrice: 12000, stock: 12 }
+    ];
+
+    const DEFAULT_CATEGORIES = ['Sembako', 'Makanan', 'Minuman', 'Bumbu', 'Umum'];
+    const DEFAULT_ADMINS = [{ id: 'admin-1', username: 'admin', password: 'admin123' }];
+    const DEFAULT_SETTINGS = {
+      id: 'store_settings',
+      name: 'Warung Aqilla',
+      address: 'Jl. Raya Utama No. 123, Jakarta',
+      phone: '081234567890',
+      paperWidth: '58mm',
+      footerMsg: 'Terima kasih atas kunjungan Anda!\nBarang yang sudah dibeli tidak dapat ditukar.'
+    };
+
+    const formatRupiah = (amount) => 'Rp ' + Math.floor(amount || 0).toLocaleString('id-ID');
+
+    function App() {
+      const [user, setUser] = useState(null);
+      const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+      const [activeTab, setActiveTab] = useState('pos');
+      
+      // Data State
+      const [products, setProducts] = useState(DEFAULT_PRODUCTS);
+      const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+      const [transactions, setTransactions] = useState([]);
+      const [adminUsers, setAdminUsers] = useState(DEFAULT_ADMINS);
+      const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+      
+      // Cart & Customer State
+      const [cart, setCart] = useState([]);
+      const [custName, setCustName] = useState('');
+      const [custNote, setCustNote] = useState('');
+      
+      // Filters
+      const [selectedCategory, setSelectedCategory] = useState('Semua');
+      const [posSearch, setPosSearch] = useState('');
+      const [productSearch, setProductSearch] = useState('');
+      
+      // Modals
+      const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+      const [isPayModalOpen, setIsPayModalOpen] = useState(false);
+      const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+      const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
+      const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+      const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+      
+      // Forms
+      const [loginInput, setLoginInput] = useState({ username: '', password: '' });
+      const [selectedPayMethod, setSelectedPayMethod] = useState('Tunai');
+      const [cashAmount, setCashAmount] = useState('');
+      const [editingProd, setEditingProd] = useState(null);
+      const [restockProd, setRestockProd] = useState(null);
+      const [restockQty, setRestockQty] = useState('');
+      const [newCatInput, setNewCatInput] = useState('');
+      const [currentTxToPrint, setCurrentTxToPrint] = useState(null);
+      const [activePendingTxId, setActivePendingTxId] = useState(null);
+      const [pendingTargetTab, setPendingTargetTab] = useState(null);
+      
+      const [opnamePhysical, setOpnamePhysical] = useState({});
+      const [adminForm, setAdminForm] = useState({ index: -1, username: '', password: '' });
+      const [settingsForm, setSettingsForm] = useState(DEFAULT_SETTINGS);
+
+      const [toast, setToast] = useState({ show: false, message: '', isError: false });
+
+      useEffect(() => {
+        const initAuth = async () => {
+          try {
+            await signInAnonymously(auth);
+          } catch (err) {
+            console.warn("Firebase Auth fallback mode activated:", err);
+          }
+        };
+        initAuth();
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+        return () => unsubscribe();
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+        const getPublicCol = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
+
+        const unsubProducts = onSnapshot(getPublicCol('products'), (snapshot) => {
+          if (!snapshot.empty) {
+            setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          } else {
+            DEFAULT_PRODUCTS.forEach(p => setDoc(doc(getPublicCol('products'), p.id), p));
+          }
+        }, err => console.log("Firestore sync warning:", err));
+
+        const unsubCategories = onSnapshot(getPublicCol('categories'), (snapshot) => {
+          if (!snapshot.empty) {
+            setCategories(snapshot.docs.map(doc => doc.data().name));
+          }
+        });
+
+        const unsubTx = onSnapshot(getPublicCol('transactions'), (snapshot) => {
+          const txs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          txs.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setTransactions(txs);
+        });
+
+        const unsubSettings = onSnapshot(getPublicCol('settings'), (snapshot) => {
+          if (!snapshot.empty) {
+            const sDoc = snapshot.docs[0].data();
+            setSettings(sDoc);
+            setSettingsForm(sDoc);
+          }
+        });
+
+        const unsubAdmins = onSnapshot(getPublicCol('admins'), (snapshot) => {
+          if (!snapshot.empty) {
+            setAdminUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+          }
+        });
+
+        return () => {
+          unsubProducts();
+          unsubCategories();
+          unsubTx();
+          unsubSettings();
+          unsubAdmins();
+        };
+      }, [user]);
+
+      const showToast = (message, isError = false) => {
+        setToast({ show: true, message, isError });
+        setTimeout(() => setToast({ show: false, message: '', isError: false }), 3000);
+      };
+
+      const switchTab = (tabId) => {
+        const protectedTabs = ['pending', 'products', 'opname', 'history', 'reports', 'settings'];
+        if (protectedTabs.includes(tabId) && !isAdminLoggedIn) {
+          setPendingTargetTab(tabId);
+          setIsLoginModalOpen(true);
+          showToast('Akses terbatas! Silakan Login Admin.', true);
+          return;
+        }
+        setActiveTab(tabId);
+      };
+
+      const toggleAdminAuth = () => {
+        if (isAdminLoggedIn) {
+          setIsAdminLoggedIn(false);
+          switchTab('pos');
+          showToast('Logout Admin berhasil.');
+        } else {
+          setIsLoginModalOpen(true);
+        }
+      };
+
+      const handleAdminLogin = (e) => {
+        e.preventDefault();
+        const matched = adminUsers.find(
+          u => u.username.toLowerCase() === loginInput.username.trim().toLowerCase() && u.password === loginInput.password.trim()
+        );
+
+        if (matched) {
+          setIsAdminLoggedIn(true);
+          setIsLoginModalOpen(false);
+          setCart([]);
+          setLoginInput({ username: '', password: '' });
+          showToast(`Selamat datang, ${matched.username}!`);
+          if (pendingTargetTab) {
+            const target = pendingTargetTab;
+            setPendingTargetTab(null);
+            setActiveTab(target);
+          } else {
+            setActiveTab('pos');
+          }
+        } else {
+          showToast('Username atau Password Admin salah!', true);
+        }
+      };
+
+      const addToCart = (product) => {
+        const cartItem = cart.find(i => i.id === product.id);
+        const currentQty = cartItem ? cartItem.qty : 0;
+
+        if (currentQty >= product.stock) {
+          showToast('Stok barang tidak mencukupi!', true);
+          return;
+        }
+
+        if (cartItem) {
+          setCart(cart.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i));
+        } else {
+          setCart([...cart, {
+            id: product.id,
+            sku: product.sku,
+            name: product.name,
+            buyPrice: product.buyPrice,
+            sellPrice: product.sellPrice,
+            qty: 1
+          }]);
+        }
+      };
+
+      const updateCartQty = (productId, delta) => {
+        const prod = products.find(p => p.id === productId);
+        const cartItem = cart.find(i => i.id === productId);
+        if (!cartItem) return;
+
+        if (delta > 0) {
+          if (prod && cartItem.qty >= prod.stock) {
+            showToast('Stok barang tidak mencukupi!', true);
+            return;
+          }
+          setCart(cart.map(i => i.id === productId ? { ...i, qty: i.qty + 1 } : i));
+        } else {
+          if (cartItem.qty <= 1) {
+            setCart(cart.filter(i => i.id !== productId));
+          } else {
+            setCart(cart.map(i => i.id === productId ? { ...i, qty: i.qty - 1 } : i));
+          }
+        }
+      };
+
+      const removeFromCart = (id) => setCart(cart.filter(i => i.id !== id));
+      const clearCart = () => { setCart([]); setCustName(''); setCustNote(''); };
+
+      const submitOrderWA = async () => {
+        if (cart.length === 0) return showToast('Keranjang belanja masih kosong!', true);
+        if (!custName.trim()) return showToast('Silakan isi Nama Pelanggan!', true);
+
+        const totalPrice = cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0);
+        const totalBuyPrice = cart.reduce((sum, item) => sum + (item.buyPrice * item.qty), 0);
+        const profit = totalPrice - totalBuyPrice;
+
+        const updatedProducts = products.map(p => {
+          const cartItem = cart.find(c => c.id === p.id);
+          if (cartItem) {
+            const newStock = Math.max(0, p.stock - cartItem.qty);
+            if (user) setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', p.id), { ...p, stock: newStock });
+            return { ...p, stock: newStock };
+          }
+          return p;
+        });
+        setProducts(updatedProducts);
+
+        const txId = 'TRX-' + Date.now().toString().slice(-6);
+        const newTx = {
+          id: txId,
+          date: new Date().toISOString(),
+          customerName: custName.trim(),
+          customerNote: custNote.trim(),
+          items: cart,
+          totalPrice,
+          profit,
+          paymentMethod: 'WhatsApp',
+          cashReceived: 0,
+          changeAmount: 0,
+          status: 'Belum Bayar'
+        };
+
+        if (user) {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', txId), newTx);
+        } else {
+          setTransactions([newTx, ...transactions]);
+        }
+
+        const storePhone = settings.phone ? settings.phone.replace(/[^0-9]/g, '') : '';
+        let waText = `*HALO ${(settings.name || 'WARUNG AQILLA').toUpperCase()}*\nSaya ingin memesan produk berikut:\n\n*Detail Pelanggan:*\n- Nama: ${custName.trim()}\n`;
+        if (custNote.trim()) waText += `- Catatan: ${custNote.trim()}\n`;
+        waText += `\n*Daftar Pesanan:*\n`;
+        cart.forEach(i => { waText += `• ${i.name} (${i.qty}x) = ${formatRupiah(i.sellPrice * i.qty)}\n`; });
+        waText += `\n*TOTAL TAGIHAN: ${formatRupiah(totalPrice)}*\nNo. Pesanan: ${txId}\n\nMohon konfirmasinya. Terima kasih!`;
+
+        window.open(`https://wa.me/${storePhone}?text=${encodeURIComponent(waText)}`, '_blank');
+        clearCart();
+        showToast('Pesanan dikirim ke WhatsApp!');
+      };
+
+      const openPaymentModal = () => {
+        if (cart.length === 0) return showToast('Keranjang belanja masih kosong!', true);
+        setSelectedPayMethod('Tunai');
+        setCashAmount('');
+        setIsPayModalOpen(true);
+      };
+
+      const processTransaction = async () => {
+        const totalPrice = cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0);
+        const totalBuyPrice = cart.reduce((sum, item) => sum + (item.buyPrice * item.qty), 0);
+        const profit = totalPrice - totalBuyPrice;
+
+        let cashReceivedNum = 0;
+        let changeAmount = 0;
+
+        if (selectedPayMethod === 'Tunai') {
+          cashReceivedNum = parseFloat(cashAmount) || 0;
+          if (cashReceivedNum < totalPrice) return showToast('Jumlah uang tunai kurang!', true);
+          changeAmount = cashReceivedNum - totalPrice;
+        } else {
+          cashReceivedNum = totalPrice;
+        }
+
+        let tx;
+        if (activePendingTxId) {
+          tx = transactions.find(t => t.id === activePendingTxId);
+          if (tx) {
+            tx = { ...tx, status: 'Lunas', paymentMethod: selectedPayMethod, cashReceived: cashReceivedNum, changeAmount, date: new Date().toISOString() };
+          }
+        } else {
+          const updatedProducts = products.map(p => {
+            const cartItem = cart.find(c => c.id === p.id);
+            if (cartItem) {
+              const newStock = Math.max(0, p.stock - cartItem.qty);
+              if (user) setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', p.id), { ...p, stock: newStock });
+              return { ...p, stock: newStock };
+            }
+            return p;
+          });
+          setProducts(updatedProducts);
+
+          tx = {
+            id: 'TRX-' + Date.now().toString().slice(-6),
+            date: new Date().toISOString(),
+            customerName: 'Pelanggan Kasir',
+            customerNote: '',
+            items: [...cart],
+            totalPrice,
+            profit,
+            paymentMethod: selectedPayMethod,
+            cashReceived: cashReceivedNum,
+            changeAmount,
+            status: 'Lunas'
+          };
+        }
+
+        if (tx && user) {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', tx.id), tx);
+        } else if (tx) {
+          setTransactions([tx, ...transactions.filter(t => t.id !== tx.id)]);
+        }
+
+        clearCart();
+        setActivePendingTxId(null);
+        setIsPayModalOpen(false);
+        showToast('Transaksi berhasil diproses!');
+
+        if (tx) {
+          setCurrentTxToPrint(tx);
+          setIsReceiptModalOpen(true);
+        }
+      };
+
+      const processPendingPayment = (txId) => {
+        const tx = transactions.find(t => t.id === txId);
+        if (!tx) return;
+        setActivePendingTxId(txId);
+        setCart([...tx.items]);
+        switchTab('pos');
+        openPaymentModal();
+      };
+
+      const pendingCount = useMemo(() => transactions.filter(t => t.status === 'Belum Bayar').length, [transactions]);
+      const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0), [cart]);
+
+      const financialStats = useMemo(() => {
+        const paidTxs = transactions.filter(t => t.status !== 'Belum Bayar');
+        const totalRevenue = paidTxs.reduce((sum, tx) => sum + (tx.totalPrice || 0), 0);
+        const totalProfit = paidTxs.reduce((sum, tx) => sum + (tx.profit || 0), 0);
+        const totalStockValue = products.reduce((sum, p) => sum + ((p.buyPrice || 0) * (p.stock || 0)), 0);
+
+        const productSales = {};
+        paidTxs.forEach(tx => {
+          tx.items.forEach(item => {
+            if (!productSales[item.name]) productSales[item.name] = { qty: 0, revenue: 0 };
+            productSales[item.name].qty += item.qty;
+            productSales[item.name].revenue += item.sellPrice * item.qty;
+          });
+        });
+
+        const topProducts = Object.entries(productSales)
+          .map(([name, data]) => ({ name, ...data }))
+          .sort((a, b) => b.qty - a.qty)
+          .slice(0, 5);
+
+        return { totalRevenue, totalProfit, paidCount: paidTxs.length, totalStockValue, topProducts };
+      }, [transactions, products]);
+
+      return (
+        <div className="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen flex flex-col md:flex-row pb-16 md:pb-0">
+          
+          {/* Toast */}
+          <div className={`fixed top-4 right-4 z-50 transform transition-transform duration-300 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-slate-700 pointer-events-none ${toast.show ? 'translate-x-0' : 'translate-x-full'}`}>
+            <i className={`fas ${toast.isError ? 'fa-exclamation-circle text-rose-400' : 'fa-check-circle text-emerald-400'}`}></i>
+            <span className="text-sm font-medium">{toast.message}</span>
+          </div>
+
+          {/* Sidebar Desktop */}
+          <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white border-r border-slate-800 shrink-0 select-none">
+            <div className="p-5 border-b border-slate-800 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-900 flex items-center justify-center font-black text-xl shadow-lg shadow-emerald-500/30">
+                <i className="fas fa-store"></i>
+              </div>
+              <div>
+                <h1 className="font-bold text-lg leading-tight tracking-tight text-white">{settings.name}</h1>
+                <span className="text-xs text-emerald-400 font-medium">Sistem Kasir & Stok</span>
+              </div>
+            </div>
+
+            <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto">
+              <button
+                onClick={() => switchTab('pos')}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-medium text-sm transition-all ${activeTab === 'pos' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <i className="fas fa-shopping-cart w-5 text-center text-base"></i>
+                  <span>Kasir (POS)</span>
+                </div>
+                <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full text-white font-semibold">Kasir</span>
+              </button>
+
+              {isAdminLoggedIn && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-800/80 mt-2">
+                  <div className="px-2 py-1 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                    Menu Admin
+                  </div>
+                  <button
+                    onClick={() => switchTab('pending')}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl font-medium text-sm transition-all ${activeTab === 'pending' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <i className="fas fa-clock w-5 text-center text-base text-amber-400"></i>
+                      <span>Pesanan Pending WA</span>
+                    </div>
+                    <span className="px-2 py-0.5 bg-amber-500 text-slate-900 rounded-full text-[10px] font-black">{pendingCount}</span>
+                  </button>
+                  <button onClick={() => switchTab('products')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all ${activeTab === 'products' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`}>
+                    <i className="fas fa-boxes-stacked w-5 text-center text-base"></i><span>Produk & Stok</span>
+                  </button>
+                  <button onClick={() => switchTab('opname')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all ${activeTab === 'opname' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`}>
+                    <i className="fas fa-clipboard-check w-5 text-center text-base"></i><span>Stok Opname</span>
+                  </button>
+                  <button onClick={() => switchTab('history')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all ${activeTab === 'history' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`}>
+                    <i className="fas fa-receipt w-5 text-center text-base"></i><span>Riwayat Penjualan</span>
+                  </button>
+                  <button onClick={() => switchTab('reports')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all ${activeTab === 'reports' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`}>
+                    <i className="fas fa-chart-pie w-5 text-center text-base"></i><span>Laporan Keuangan</span>
+                  </button>
+                  <button onClick={() => switchTab('settings')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium text-sm transition-all ${activeTab === 'settings' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}`}>
+                    <i className="fas fa-sliders w-5 text-center text-base"></i><span>Pengaturan Toko</span>
+                  </button>
+                </div>
+              )}
+            </nav>
+
+            <div className="p-4 border-t border-slate-800 space-y-2">
+              <div className="flex items-center justify-between bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/50">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2.5 h-2.5 rounded-full ${isAdminLoggedIn ? 'bg-emerald-500 animate-pulse' : 'bg-slate-500'}`}></div>
+                  <span className="text-xs font-semibold text-slate-300">{isAdminLoggedIn ? 'Admin Aktif' : 'Mode Kasir'}</span>
+                </div>
+                <button onClick={toggleAdminAuth} className={`text-xs font-bold underline ${isAdminLoggedIn ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {isAdminLoggedIn ? 'Logout' : 'Login Admin'}
+                </button>
+              </div>
+            </div>
+          </aside>
+
+          {/* Main Content Area */}
+          <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+            <header className="md:hidden bg-slate-900 text-white p-4 border-b border-slate-800 flex items-center justify-between shadow-md">
+              <div className="flex items-center gap-2">
+                <i className="fas fa-store text-emerald-400"></i>
+                <h1 className="font-bold text-base">{settings.name}</h1>
+              </div>
+              <button onClick={toggleAdminAuth} className="text-xs px-2.5 py-1 rounded bg-slate-800 text-emerald-400 border border-slate-700">
+                {isAdminLoggedIn ? 'Logout' : 'Login Admin'}
+              </button>
+            </header>
+
+            <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
+              {/* POS VIEW */}
+              {activeTab === 'pos' && (
+                <div className="h-full flex flex-col lg:flex-row gap-5">
+                  <div className="flex-1 flex flex-col min-w-0">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mb-4 space-y-3">
+                      <input
+                        type="text"
+                        value={posSearch}
+                        onChange={(e) => setPosSearch(e.target.value)}
+                        placeholder="Cari nama produk atau SKU..."
+                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm"
+                      />
+                      <div className="flex gap-2 overflow-x-auto pb-1">
+                        {['Semua', ...categories].map(cat => (
+                          <button
+                            key={cat}
+                            onClick={() => setSelectedCategory(cat)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap ${selectedCategory === cat ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 overflow-y-auto pr-1">
+                      {products.filter(p => {
+                        const matchesCat = selectedCategory === 'Semua' || p.category === selectedCategory;
+                        const matchesSearch = p.name.toLowerCase().includes(posSearch.toLowerCase()) || p.sku.toLowerCase().includes(posSearch.toLowerCase());
+                        return matchesCat && matchesSearch;
+                      }).map(p => {
+                        const cartItem = cart.find(c => c.id === p.id);
+                        const availStock = p.stock - (cartItem ? cartItem.qty : 0);
+
+                        return (
+                          <div key={p.id} className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+                            <div>
+                              <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-slate-100 text-slate-600 rounded">{p.category}</span>
+                              <h4 className="font-bold text-slate-800 text-xs sm:text-sm mt-1 leading-snug line-clamp-2">{p.name}</h4>
+                            </div>
+                            <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
+                              <span className="font-black text-emerald-600 text-xs sm:text-sm">{formatRupiah(p.sellPrice)}</span>
+                              <span className="text-xs text-slate-500 font-bold">{availStock} pcs</span>
+                            </div>
+                            <button
+                              onClick={() => addToCart(p)}
+                              disabled={availStock <= 0}
+                              className="mt-3 w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-xs"
+                            >
+                              {availStock <= 0 ? 'Habis' : 'Tambah'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Cart */}
+                  <div className="w-full lg:w-96 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col shrink-0">
+                    <h3 className="font-bold text-slate-800 pb-2 border-b border-slate-100">Keranjang Belanja</h3>
+                    <div className="max-h-[280px] overflow-y-auto py-3 space-y-2">
+                      {cart.length === 0 ? (
+                        <p className="py-8 text-center text-xs text-slate-400 font-semibold">Keranjang Belanja Kosong</p>
+                      ) : (
+                        cart.map(item => (
+                          <div key={item.id} className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+                            <div className="flex-1 pr-2">
+                              <h5 className="font-bold text-slate-800 truncate">{item.name}</h5>
+                              <span className="text-emerald-600 font-bold">{formatRupiah(item.sellPrice * item.qty)}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button onClick={() => updateCartQty(item.id, -1)} className="w-6 h-6 bg-white border border-slate-300 rounded font-bold">-</button>
+                              <span className="w-5 text-center font-bold">{item.qty}</span>
+                              <button onClick={() => updateCartQty(item.id, 1)} className="w-6 h-6 bg-white border border-slate-300 rounded font-bold">+</button>
+                              <button onClick={() => removeFromCart(item.id)} className="w-6 h-6 bg-rose-50 text-rose-600 rounded font-bold ml-1">✕</button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 space-y-3">
+                      {!isAdminLoggedIn && (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={custName}
+                            onChange={(e) => setCustName(e.target.value)}
+                            placeholder="Nama Pelanggan (*Wajib)..."
+                            className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs"
+                          />
+                          <input
+                            type="text"
+                            value={custNote}
+                            onChange={(e) => setCustNote(e.target.value)}
+                            placeholder="Catatan (Opsional)..."
+                            className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs"
+                          />
+                        </div>
+                      )}
+
+                      <div className="flex justify-between items-center py-1">
+                        <span className="text-slate-500 text-xs font-medium">Total</span>
+                        <span className="text-2xl font-black text-emerald-600">{formatRupiah(cartTotal)}</span>
+                      </div>
+
+                      {!isAdminLoggedIn ? (
+                        <button onClick={submitOrderWA} className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg flex items-center justify-center gap-2 text-xs">
+                          <i className="fab fa-whatsapp text-lg"></i> Pesan via WhatsApp
+                        </button>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button onClick={clearCart} className="w-1/3 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl text-xs">Kosongkan</button>
+                          <button onClick={openPaymentModal} className="w-2/3 py-3 bg-emerald-600 text-white font-bold rounded-xl text-xs">Bayar Sekarang</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ADMIN PENDING TAB */}
+              {activeTab === 'pending' && isAdminLoggedIn && (
+                <div className="space-y-4">
+                  <h2 className="font-bold text-lg text-slate-800">Pesanan Pending (WhatsApp)</h2>
+                  <div className="space-y-3">
+                    {transactions.filter(t => t.status === 'Belum Bayar').map(tx => (
+                      <div key={tx.id} className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm space-y-2">
+                        <div className="flex justify-between">
+                          <div>
+                            <span className="font-bold text-xs">{tx.id} - {tx.customerName}</span>
+                            {tx.customerNote && <p className="text-xs text-amber-800 bg-amber-50 p-1 rounded mt-1">{tx.customerNote}</p>}
+                          </div>
+                          <span className="font-black text-emerald-600">{formatRupiah(tx.totalPrice)}</span>
+                        </div>
+                        <button onClick={() => processPendingPayment(tx.id)} className="w-full py-2 bg-emerald-600 text-white font-bold rounded-xl text-xs">
+                          Proses Pembayaran & Pelunasan
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </main>
+
+          {/* LOGIN MODAL */}
+          {isLoginModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4">
+                <h3 className="font-bold text-base">Login Admin</h3>
+                <form onSubmit={handleAdminLogin} className="space-y-3">
+                  <input
+                    type="text"
+                    value={loginInput.username}
+                    onChange={(e) => setLoginInput({ ...loginInput, username: e.target.value })}
+                    placeholder="Username (admin)"
+                    className="w-full px-3.5 py-2.5 border rounded-xl text-sm"
+                  />
+                  <input
+                    type="password"
+                    value={loginInput.password}
+                    onChange={(e) => setLoginInput({ ...loginInput, password: e.target.value })}
+                    placeholder="Password (admin123)"
+                    className="w-full px-3.5 py-2.5 border rounded-xl text-sm"
+                  />
+                  <button type="submit" className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl text-sm">
+                    Masuk
+                  </button>
+                </form>
+                <button onClick={() => setIsLoginModalOpen(false)} className="w-full text-xs text-slate-400">Batal</button>
+              </div>
+            </div>
+          )}
+
+          {/* PAYMENT MODAL */}
+          {isPayModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4">
+                <h3 className="font-bold text-lg">Pembayaran Penjualan</h3>
+                <div className="text-center bg-slate-50 p-3 rounded-xl">
+                  <span className="text-xs text-slate-500">Total Pembayaran</span>
+                  <div className="text-3xl font-black text-emerald-600">{formatRupiah(cartTotal)}</div>
+                </div>
+                <input
+                  type="number"
+                  value={cashAmount}
+                  onChange={(e) => setCashAmount(e.target.value)}
+                  placeholder="Jumlah Uang Tunai (Rp)..."
+                  className="w-full px-4 py-3 text-lg font-bold border rounded-xl"
+                />
+                <button onClick={processTransaction} className="w-full py-3.5 bg-emerald-600 text-white font-bold rounded-xl text-sm">
+                  Proses & Cetak Struk
+                </button>
+                <button onClick={() => setIsPayModalOpen(false)} className="w-full text-xs text-slate-400">Batal</button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>````````````````````````````````````
