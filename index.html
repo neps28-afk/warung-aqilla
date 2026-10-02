@@ -17,7 +17,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <!-- Babel Standalone Compiler CDN -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- Firebase Compat Libraries for inline Browser React -->
+  <!-- Firebase Compat Libraries -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -120,7 +120,7 @@
       const [txLimit, setTxLimit] = useState('20');
       const [topProdLimit, setTopProdLimit] = useState('5');
 
-      // Laporan Keuangan Period Filter
+      // Financial Reports Period Filters
       const [reportPeriod, setReportPeriod] = useState('all'); // 'all', 'monthly', 'yearly'
       const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
       const [reportYear, setReportYear] = useState(new Date().getFullYear().toString());
@@ -874,7 +874,142 @@
         return items.slice(0, num);
       };
 
-      const printThermalReceipt = () => {
+      // Direct Web Bluetooth ESC/POS print for POS58B with standard window.print() fallback
+      const printThermalReceipt = async () => {
+        if (!currentTxToPrint) return;
+
+        if (navigator.bluetooth) {
+          try {
+            showToast('Mencari printer Bluetooth POS58B...');
+            const device = await navigator.bluetooth.requestDevice({
+              filters: [
+                { namePrefix: 'POS' },
+                { namePrefix: 'POS58' },
+                { namePrefix: 'POS58B' },
+                { namePrefix: 'POS-58' },
+                { namePrefix: 'RPP' },
+                { namePrefix: 'BT' },
+                { namePrefix: 'InnerPrinter' }
+              ],
+              optionalServices: [
+                '000018f0-0000-1000-8000-00805f9b34fb',
+                '0000ff00-0000-1000-8000-00805f9b34fb',
+                '00004953-0000-1000-8000-00805f9b34fb',
+                'e7810a71-73ae-499d-8c15-faa9aef0c3f2'
+              ]
+            }).catch(async () => {
+              return await navigator.bluetooth.requestDevice({
+                acceptAllDevices: true,
+                optionalServices: [
+                  '000018f0-0000-1000-8000-00805f9b34fb',
+                  '0000ff00-0000-1000-8000-00805f9b34fb',
+                  '00004953-0000-1000-8000-00805f9b34fb',
+                  'e7810a71-73ae-499d-8c15-faa9aef0c3f2'
+                ]
+              });
+            });
+
+            if (device) {
+              const server = await device.gatt.connect();
+              const services = await server.getPrimaryServices();
+              let characteristic = null;
+
+              for (const service of services) {
+                const chars = await service.getCharacteristics();
+                for (const c of chars) {
+                  if (c.properties.write || c.properties.writeWithoutResponse) {
+                    characteristic = c;
+                    break;
+                  }
+                }
+                if (characteristic) break;
+              }
+
+              if (characteristic) {
+                const encoder = new TextEncoder();
+                let bytes = [];
+
+                // Reset printer
+                bytes.push(0x1B, 0x40);
+
+                // Align Center
+                bytes.push(0x1B, 0x61, 0x01);
+                // Bold ON
+                bytes.push(0x1B, 0x45, 0x01);
+                bytes.push(...encoder.encode((settings.name || 'WARUNG AQILLA').toUpperCase() + '\n'));
+                // Bold OFF
+                bytes.push(0x1B, 0x45, 0x00);
+                bytes.push(...encoder.encode((settings.address || '') + '\n'));
+                bytes.push(...encoder.encode('Telp/WA: ' + (settings.phone || '') + '\n'));
+                bytes.push(...encoder.encode('--------------------------------\n'));
+
+                // Align Left
+                bytes.push(0x1B, 0x61, 0x00);
+                bytes.push(...encoder.encode('No: ' + currentTxToPrint.id + '\n'));
+                bytes.push(...encoder.encode('Waktu: ' + new Date(currentTxToPrint.date).toLocaleString('id-ID') + '\n'));
+                bytes.push(...encoder.encode('Pelanggan: ' + (currentTxToPrint.customerName || 'Pelanggan') + '\n'));
+                bytes.push(...encoder.encode('Metode: ' + currentTxToPrint.paymentMethod + '\n'));
+                bytes.push(...encoder.encode('--------------------------------\n'));
+
+                currentTxToPrint.items.forEach(item => {
+                  let name = item.name;
+                  if (name.length > 32) name = name.substring(0, 32);
+                  bytes.push(...encoder.encode(name + '\n'));
+
+                  let qtyPrice = `${item.qty} x ${formatRupiah(item.sellPrice)}`;
+                  let totalPrice = formatRupiah(item.sellPrice * item.qty);
+                  let spaceCount = Math.max(1, 32 - qtyPrice.length - totalPrice.length);
+                  bytes.push(...encoder.encode(qtyPrice + ' '.repeat(spaceCount) + totalPrice + '\n'));
+                });
+
+                bytes.push(...encoder.encode('--------------------------------\n'));
+
+                // Total
+                let totalLabel = 'TOTAL';
+                let totalVal = formatRupiah(currentTxToPrint.totalPrice);
+                let totalSpaces = Math.max(1, 32 - totalLabel.length - totalVal.length);
+                bytes.push(...encoder.encode(totalLabel + ' '.repeat(totalSpaces) + totalVal + '\n'));
+
+                if (currentTxToPrint.paymentMethod === 'Tunai') {
+                  let cashLabel = 'Bayar Tunai';
+                  let cashVal = formatRupiah(currentTxToPrint.cashReceived);
+                  let cashSpaces = Math.max(1, 32 - cashLabel.length - cashVal.length);
+                  bytes.push(...encoder.encode(cashLabel + ' '.repeat(cashSpaces) + cashVal + '\n'));
+
+                  let changeLabel = 'Kembali';
+                  let changeVal = formatRupiah(currentTxToPrint.changeAmount);
+                  let changeSpaces = Math.max(1, 32 - changeLabel.length - changeVal.length);
+                  bytes.push(...encoder.encode(changeLabel + ' '.repeat(changeSpaces) + changeVal + '\n'));
+                }
+
+                bytes.push(...encoder.encode('--------------------------------\n'));
+
+                // Center Align Footer
+                bytes.push(0x1B, 0x61, 0x01);
+                bytes.push(...encoder.encode((settings.footerMsg || 'Terima kasih!') + '\n\n\n\n'));
+
+                const uint8Array = new Uint8Array(bytes);
+                const chunkSize = 20;
+                for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                  const chunk = uint8Array.slice(i, i + chunkSize);
+                  if (characteristic.properties.writeWithoutResponse) {
+                    await characteristic.writeValueWithoutResponse(chunk);
+                  } else {
+                    await characteristic.writeValueWithResponse(chunk);
+                  }
+                }
+
+                showToast('Struk berhasil dicetak ke Bluetooth POS58B!');
+                device.gatt.disconnect();
+                return;
+              }
+            }
+          } catch (btErr) {
+            console.warn("Bluetooth print canceled/fallback to browser print:", btErr);
+          }
+        }
+
+        // Native browser print fallback
         window.print();
       };
 
@@ -2201,12 +2336,15 @@
             </div>
           )}
 
-          {/* Thermal Receipt Preview Modal */}
+          {/* Thermal Receipt Preview Modal (Pratinjau Struk) */}
           {isReceiptModalOpen && currentTxToPrint && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
                 <div className="p-4 bg-slate-900 text-white flex justify-between items-center shrink-0">
-                  <h3 className="font-bold text-base"><i className="fas fa-receipt mr-2"></i>Struk Pembayaran</h3>
+                  <h3 className="font-bold text-base flex items-center gap-2">
+                    <i className="fas fa-receipt text-emerald-400"></i>
+                    <span>Pratinjau Struk Pembayaran</span>
+                  </h3>
                   <button onClick={() => setIsReceiptModalOpen(false)} className="text-slate-400 hover:text-white text-xl">&times;</button>
                 </div>
                 
@@ -2214,8 +2352,8 @@
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 font-mono text-xs text-slate-900 space-y-3">
                     <div className="text-center">
                       <div className="font-bold text-sm">{settings.name}</div>
-                      <div className="text-[10px]">{settings.address}</div>
-                      <div className="text-[10px]">Telp/WA: {settings.phone}</div>
+                      <div className="text-[10px] text-slate-600">{settings.address}</div>
+                      <div className="text-[10px] text-slate-600">Telp/WA: {settings.phone}</div>
                     </div>
                     <div className="border-t border-dashed border-slate-400 my-1"></div>
                     <div className="text-[10px] space-y-0.5">
@@ -2251,7 +2389,7 @@
                       </div>
                     )}
                     <div className="border-t border-dashed border-slate-400 my-1"></div>
-                    <div className="text-center text-[10px] whitespace-pre-line">
+                    <div className="text-center text-[10px] whitespace-pre-line text-slate-600">
                       {settings.footerMsg}
                     </div>
                   </div>
@@ -2263,7 +2401,7 @@
                   </button>
                   <button onClick={printThermalReceipt} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center justify-center gap-1.5">
                     <i className="fas fa-print"></i>
-                    <span>Cetak Struk</span>
+                    <span>Cetak Struk POS58B</span>
                   </button>
                 </div>
               </div>
