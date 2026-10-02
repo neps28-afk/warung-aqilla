@@ -94,6 +94,7 @@
       const [user, setUser] = useState(null);
       const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
       const [activeTab, setActiveTab] = useState('pos');
+      const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
       
       // Data State
       const [products, setProducts] = useState(DEFAULT_PRODUCTS);
@@ -120,7 +121,7 @@
       const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
       const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
       
-      // Forms
+      // Forms & Active Objects
       const [loginInput, setLoginInput] = useState({ username: '', password: '' });
       const [selectedPayMethod, setSelectedPayMethod] = useState('Tunai');
       const [cashAmount, setCashAmount] = useState('');
@@ -198,10 +199,7 @@
         };
       }, [user]);
 
-      const showToast = (message, isError = false) => {
-        setToast({ show: true, message, isError });
-        setTimeout(() => setToast({ show: false, message: '', isError: false }), 3000);
-      };
+      /* ... existing code ... */
 
       const switchTab = (tabId) => {
         const protectedTabs = ['pending', 'products', 'opname', 'history', 'reports', 'settings'];
@@ -212,250 +210,11 @@
           return;
         }
         setActiveTab(tabId);
+        setIsMobileMenuOpen(false);
       };
-
-      const toggleAdminAuth = () => {
-        if (isAdminLoggedIn) {
-          setIsAdminLoggedIn(false);
-          switchTab('pos');
-          showToast('Logout Admin berhasil.');
-        } else {
-          setIsLoginModalOpen(true);
-        }
-      };
-
-      const handleAdminLogin = (e) => {
-        e.preventDefault();
-        const matched = adminUsers.find(
-          u => u.username.toLowerCase() === loginInput.username.trim().toLowerCase() && u.password === loginInput.password.trim()
-        );
-
-        if (matched) {
-          setIsAdminLoggedIn(true);
-          setIsLoginModalOpen(false);
-          setCart([]);
-          setLoginInput({ username: '', password: '' });
-          showToast(`Selamat datang, ${matched.username}!`);
-          if (pendingTargetTab) {
-            const target = pendingTargetTab;
-            setPendingTargetTab(null);
-            setActiveTab(target);
-          } else {
-            setActiveTab('pos');
-          }
-        } else {
-          showToast('Username atau Password Admin salah!', true);
-        }
-      };
-
-      const addToCart = (product) => {
-        const cartItem = cart.find(i => i.id === product.id);
-        const currentQty = cartItem ? cartItem.qty : 0;
-
-        if (currentQty >= product.stock) {
-          showToast('Stok barang tidak mencukupi!', true);
-          return;
-        }
-
-        if (cartItem) {
-          setCart(cart.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i));
-        } else {
-          setCart([...cart, {
-            id: product.id,
-            sku: product.sku,
-            name: product.name,
-            buyPrice: product.buyPrice,
-            sellPrice: product.sellPrice,
-            qty: 1
-          }]);
-        }
-      };
-
-      const updateCartQty = (productId, delta) => {
-        const prod = products.find(p => p.id === productId);
-        const cartItem = cart.find(i => i.id === productId);
-        if (!cartItem) return;
-
-        if (delta > 0) {
-          if (prod && cartItem.qty >= prod.stock) {
-            showToast('Stok barang tidak mencukupi!', true);
-            return;
-          }
-          setCart(cart.map(i => i.id === productId ? { ...i, qty: i.qty + 1 } : i));
-        } else {
-          if (cartItem.qty <= 1) {
-            setCart(cart.filter(i => i.id !== productId));
-          } else {
-            setCart(cart.map(i => i.id === productId ? { ...i, qty: i.qty - 1 } : i));
-          }
-        }
-      };
-
-      const removeFromCart = (id) => setCart(cart.filter(i => i.id !== id));
-      const clearCart = () => { setCart([]); setCustName(''); setCustNote(''); };
-
-      const submitOrderWA = async () => {
-        if (cart.length === 0) return showToast('Keranjang belanja masih kosong!', true);
-        if (!custName.trim()) return showToast('Silakan isi Nama Pelanggan!', true);
-
-        const totalPrice = cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0);
-        const totalBuyPrice = cart.reduce((sum, item) => sum + (item.buyPrice * item.qty), 0);
-        const profit = totalPrice - totalBuyPrice;
-
-        const updatedProducts = products.map(p => {
-          const cartItem = cart.find(c => c.id === p.id);
-          if (cartItem) {
-            const newStock = Math.max(0, p.stock - cartItem.qty);
-            if (user) setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', p.id), { ...p, stock: newStock });
-            return { ...p, stock: newStock };
-          }
-          return p;
-        });
-        setProducts(updatedProducts);
-
-        const txId = 'TRX-' + Date.now().toString().slice(-6);
-        const newTx = {
-          id: txId,
-          date: new Date().toISOString(),
-          customerName: custName.trim(),
-          customerNote: custNote.trim(),
-          items: cart,
-          totalPrice,
-          profit,
-          paymentMethod: 'WhatsApp',
-          cashReceived: 0,
-          changeAmount: 0,
-          status: 'Belum Bayar'
-        };
-
-        if (user) {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', txId), newTx);
-        } else {
-          setTransactions([newTx, ...transactions]);
-        }
-
-        const storePhone = settings.phone ? settings.phone.replace(/[^0-9]/g, '') : '';
-        let waText = `*HALO ${(settings.name || 'WARUNG AQILLA').toUpperCase()}*\nSaya ingin memesan produk berikut:\n\n*Detail Pelanggan:*\n- Nama: ${custName.trim()}\n`;
-        if (custNote.trim()) waText += `- Catatan: ${custNote.trim()}\n`;
-        waText += `\n*Daftar Pesanan:*\n`;
-        cart.forEach(i => { waText += `• ${i.name} (${i.qty}x) = ${formatRupiah(i.sellPrice * i.qty)}\n`; });
-        waText += `\n*TOTAL TAGIHAN: ${formatRupiah(totalPrice)}*\nNo. Pesanan: ${txId}\n\nMohon konfirmasinya. Terima kasih!`;
-
-        window.open(`https://wa.me/${storePhone}?text=${encodeURIComponent(waText)}`, '_blank');
-        clearCart();
-        showToast('Pesanan dikirim ke WhatsApp!');
-      };
-
-      const openPaymentModal = () => {
-        if (cart.length === 0) return showToast('Keranjang belanja masih kosong!', true);
-        setSelectedPayMethod('Tunai');
-        setCashAmount('');
-        setIsPayModalOpen(true);
-      };
-
-      const processTransaction = async () => {
-        const totalPrice = cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0);
-        const totalBuyPrice = cart.reduce((sum, item) => sum + (item.buyPrice * item.qty), 0);
-        const profit = totalPrice - totalBuyPrice;
-
-        let cashReceivedNum = 0;
-        let changeAmount = 0;
-
-        if (selectedPayMethod === 'Tunai') {
-          cashReceivedNum = parseFloat(cashAmount) || 0;
-          if (cashReceivedNum < totalPrice) return showToast('Jumlah uang tunai kurang!', true);
-          changeAmount = cashReceivedNum - totalPrice;
-        } else {
-          cashReceivedNum = totalPrice;
-        }
-
-        let tx;
-        if (activePendingTxId) {
-          tx = transactions.find(t => t.id === activePendingTxId);
-          if (tx) {
-            tx = { ...tx, status: 'Lunas', paymentMethod: selectedPayMethod, cashReceived: cashReceivedNum, changeAmount, date: new Date().toISOString() };
-          }
-        } else {
-          const updatedProducts = products.map(p => {
-            const cartItem = cart.find(c => c.id === p.id);
-            if (cartItem) {
-              const newStock = Math.max(0, p.stock - cartItem.qty);
-              if (user) setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', p.id), { ...p, stock: newStock });
-              return { ...p, stock: newStock };
-            }
-            return p;
-          });
-          setProducts(updatedProducts);
-
-          tx = {
-            id: 'TRX-' + Date.now().toString().slice(-6),
-            date: new Date().toISOString(),
-            customerName: 'Pelanggan Kasir',
-            customerNote: '',
-            items: [...cart],
-            totalPrice,
-            profit,
-            paymentMethod: selectedPayMethod,
-            cashReceived: cashReceivedNum,
-            changeAmount,
-            status: 'Lunas'
-          };
-        }
-
-        if (tx && user) {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', tx.id), tx);
-        } else if (tx) {
-          setTransactions([tx, ...transactions.filter(t => t.id !== tx.id)]);
-        }
-
-        clearCart();
-        setActivePendingTxId(null);
-        setIsPayModalOpen(false);
-        showToast('Transaksi berhasil diproses!');
-
-        if (tx) {
-          setCurrentTxToPrint(tx);
-          setIsReceiptModalOpen(true);
-        }
-      };
-
-      const processPendingPayment = (txId) => {
-        const tx = transactions.find(t => t.id === txId);
-        if (!tx) return;
-        setActivePendingTxId(txId);
-        setCart([...tx.items]);
-        switchTab('pos');
-        openPaymentModal();
-      };
-
-      const pendingCount = useMemo(() => transactions.filter(t => t.status === 'Belum Bayar').length, [transactions]);
-      const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0), [cart]);
-
-      const financialStats = useMemo(() => {
-        const paidTxs = transactions.filter(t => t.status !== 'Belum Bayar');
-        const totalRevenue = paidTxs.reduce((sum, tx) => sum + (tx.totalPrice || 0), 0);
-        const totalProfit = paidTxs.reduce((sum, tx) => sum + (tx.profit || 0), 0);
-        const totalStockValue = products.reduce((sum, p) => sum + ((p.buyPrice || 0) * (p.stock || 0)), 0);
-
-        const productSales = {};
-        paidTxs.forEach(tx => {
-          tx.items.forEach(item => {
-            if (!productSales[item.name]) productSales[item.name] = { qty: 0, revenue: 0 };
-            productSales[item.name].qty += item.qty;
-            productSales[item.name].revenue += item.sellPrice * item.qty;
-          });
-        });
-
-        const topProducts = Object.entries(productSales)
-          .map(([name, data]) => ({ name, ...data }))
-          .sort((a, b) => b.qty - a.qty)
-          .slice(0, 5);
-
-        return { totalRevenue, totalProfit, paidCount: paidTxs.length, totalStockValue, topProducts };
-      }, [transactions, products]);
 
       return (
-        <div className="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen flex flex-col md:flex-row pb-16 md:pb-0">
+        <div className="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen flex flex-col md:flex-row pb-20 md:pb-0">
           
           {/* Toast */}
           <div className={`fixed top-4 right-4 z-50 transform transition-transform duration-300 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-slate-700 pointer-events-none ${toast.show ? 'translate-x-0' : 'translate-x-full'}`}>
@@ -536,15 +295,86 @@
 
           {/* Main Content Area */}
           <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-            <header className="md:hidden bg-slate-900 text-white p-4 border-b border-slate-800 flex items-center justify-between shadow-md">
-              <div className="flex items-center gap-2">
-                <i className="fas fa-store text-emerald-400"></i>
-                <h1 className="font-bold text-base">{settings.name}</h1>
+            
+            {/* Header Mobile dengan Tombol Menu Toggle */}
+            <header className="md:hidden bg-slate-900 text-white p-3.5 border-b border-slate-800 flex items-center justify-between shadow-md sticky top-0 z-30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500 text-slate-900 flex items-center justify-center font-black">
+                  <i className="fas fa-store text-sm"></i>
+                </div>
+                <div>
+                  <h1 className="font-bold text-sm tracking-tight leading-tight">{settings.name}</h1>
+                  <span className="text-[10px] text-emerald-400 font-medium block">
+                    {isAdminLoggedIn ? '● Mode Admin' : '● Mode Kasir'}
+                  </span>
+                </div>
               </div>
-              <button onClick={toggleAdminAuth} className="text-xs px-2.5 py-1 rounded bg-slate-800 text-emerald-400 border border-slate-700">
-                {isAdminLoggedIn ? 'Logout' : 'Login Admin'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                  className="p-2 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold text-xs flex items-center gap-1.5 px-3 hover:bg-slate-700 transition-colors"
+                >
+                  <i className={`fas ${isMobileMenuOpen ? 'fa-xmark' : 'fa-bars'} text-emerald-400 text-sm`}></i>
+                  <span>Menu</span>
+                </button>
+              </div>
             </header>
+
+            {/* Dropdown Menu HP / Mobile Drawer */}
+            {isMobileMenuOpen && (
+              <div className="md:hidden bg-slate-900 text-white border-b border-slate-800 p-4 space-y-2 shadow-2xl sticky top-[57px] z-30">
+                <div className="text-[10px] font-bold tracking-wider text-slate-400 uppercase mb-2">
+                  Navigasi Aplikasi
+                </div>
+                <button
+                  onClick={() => switchTab('pos')}
+                  className={`w-full flex items-center justify-between p-3 rounded-xl font-semibold text-xs ${activeTab === 'pos' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'}`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <i className="fas fa-shopping-cart w-4 text-center"></i>
+                    <span>Kasir (POS)</span>
+                  </div>
+                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full text-white font-semibold">Kasir</span>
+                </button>
+
+                {isAdminLoggedIn ? (
+                  <>
+                    <button
+                      onClick={() => switchTab('pending')}
+                      className={`w-full flex items-center justify-between p-3 rounded-xl font-semibold text-xs ${activeTab === 'pending' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'}`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <i className="fas fa-clock text-amber-400 w-4 text-center"></i>
+                        <span>Pesanan Pending WA</span>
+                      </div>
+                      <span className="px-2 py-0.5 bg-amber-500 text-slate-900 rounded-full text-[10px] font-black">{pendingCount}</span>
+                    </button>
+                    <button onClick={() => switchTab('products')} className={`w-full flex items-center gap-2.5 p-3 rounded-xl font-semibold text-xs ${activeTab === 'products' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                      <i className="fas fa-boxes-stacked w-4 text-center"></i><span>Produk & Stok</span>
+                    </button>
+                    <button onClick={() => switchTab('opname')} className={`w-full flex items-center gap-2.5 p-3 rounded-xl font-semibold text-xs ${activeTab === 'opname' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                      <i className="fas fa-clipboard-check w-4 text-center"></i><span>Stok Opname</span>
+                    </button>
+                    <button onClick={() => switchTab('history')} className={`w-full flex items-center gap-2.5 p-3 rounded-xl font-semibold text-xs ${activeTab === 'history' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                      <i className="fas fa-receipt w-4 text-center"></i><span>Riwayat Penjualan</span>
+                    </button>
+                    <button onClick={() => switchTab('reports')} className={`w-full flex items-center gap-2.5 p-3 rounded-xl font-semibold text-xs ${activeTab === 'reports' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                      <i className="fas fa-chart-pie w-4 text-center"></i><span>Laporan Keuangan</span>
+                    </button>
+                    <button onClick={() => switchTab('settings')} className={`w-full flex items-center gap-2.5 p-3 rounded-xl font-semibold text-xs ${activeTab === 'settings' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                      <i className="fas fa-sliders w-4 text-center"></i><span>Pengaturan Toko</span>
+                    </button>
+                  </>
+                ) : null}
+
+                <div className="pt-2 border-t border-slate-800 flex justify-between items-center">
+                  <span className="text-xs text-slate-400">{isAdminLoggedIn ? 'Status: Admin' : 'Status: Kasir/Tamu'}</span>
+                  <button onClick={() => { setIsMobileMenuOpen(false); toggleAdminAuth(); }} className={`text-xs font-bold underline px-3 py-1.5 rounded-lg ${isAdminLoggedIn ? 'bg-rose-950 text-rose-400' : 'bg-slate-800 text-emerald-400'}`}>
+                    {isAdminLoggedIn ? 'Logout Admin' : 'Login Admin'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
               {/* POS VIEW */}
@@ -693,6 +523,54 @@
             </div>
           </main>
 
+          {/* Bottom Fixed Navigation Bar HP */}
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-40 flex items-center justify-around p-1.5 shadow-2xl overflow-x-auto">
+            <button
+              onClick={() => switchTab('pos')}
+              className={`flex flex-col items-center justify-center py-1 px-2.5 min-w-[55px] rounded-lg ${activeTab === 'pos' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
+            >
+              <i className="fas fa-shopping-cart text-base"></i>
+              <span className="text-[10px] mt-0.5">Kasir</span>
+            </button>
+
+            {isAdminLoggedIn && (
+              <>
+                <button
+                  onClick={() => switchTab('pending')}
+                  className={`flex flex-col items-center justify-center py-1 px-2.5 min-w-[55px] rounded-lg relative ${activeTab === 'pending' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
+                >
+                  <i className="fas fa-clock text-base text-amber-400"></i>
+                  <span className="text-[10px] mt-0.5">Pending</span>
+                  {pendingCount > 0 && (
+                    <span className="absolute top-0 right-1 px-1 bg-amber-500 text-slate-900 rounded-full text-[9px] font-black">{pendingCount}</span>
+                  )}
+                </button>
+                <button
+                  onClick={() => switchTab('products')}
+                  className={`flex flex-col items-center justify-center py-1 px-2.5 min-w-[55px] rounded-lg ${activeTab === 'products' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
+                >
+                  <i className="fas fa-boxes-stacked text-base"></i>
+                  <span className="text-[10px] mt-0.5">Produk</span>
+                </button>
+                <button
+                  onClick={() => switchTab('history')}
+                  className={`flex flex-col items-center justify-center py-1 px-2.5 min-w-[55px] rounded-lg ${activeTab === 'history' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
+                >
+                  <i className="fas fa-receipt text-base"></i>
+                  <span className="text-[10px] mt-0.5">Riwayat</span>
+                </button>
+              </>
+            )}
+
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="flex flex-col items-center justify-center py-1 px-2.5 min-w-[55px] rounded-lg text-slate-400"
+            >
+              <i className="fas fa-bars text-base"></i>
+              <span className="text-[10px] mt-0.5">Menu</span>
+            </button>
+          </nav>
+
           {/* LOGIN MODAL */}
           {isLoginModalOpen && (
             <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4">
@@ -738,6 +616,23 @@
                   placeholder="Jumlah Uang Tunai (Rp)..."
                   className="w-full px-4 py-3 text-lg font-bold border rounded-xl"
                 />
+                <button onClick={processTransaction} className="w-full py-3.5 bg-emerald-600 text-white font-
+          {/* PAYMENT MODAL */}
+          {isPayModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full p-5 space-y-4">
+                <h3 className="font-bold text-lg">Pembayaran Penjualan</h3>
+                <div className="text-center bg-slate-50 p-3 rounded-xl">
+                  <span className="text-xs text-slate-500">Total Pembayaran</span>
+                  <div className="text-3xl font-black text-emerald-600">{formatRupiah(cartTotal)}</div>
+                </div>
+                <input
+                  type="number"
+                  value={cashAmount}
+                  onChange={(e) => setCashAmount(e.target.value)}
+                  placeholder="Jumlah Uang Tunai (Rp)..."
+                  className="w-full px-4 py-3 text-lg font-bold border rounded-xl"
+                />
                 <button onClick={processTransaction} className="w-full py-3.5 bg-emerald-600 text-white font-bold rounded-xl text-sm">
                   Proses & Cetak Struk
                 </button>
@@ -753,4 +648,4 @@
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
-</html>````````````````````````````````````
+</html>
