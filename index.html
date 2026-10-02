@@ -111,6 +111,7 @@
       const [selectedCategory, setSelectedCategory] = useState('Semua');
       const [posSearch, setPosSearch] = useState('');
       const [productSearch, setProductSearch] = useState('');
+      const [prodCategoryFilter, setProdCategoryFilter] = useState('Semua');
       const [txMonthFilter, setTxMonthFilter] = useState('');
 
       // Page Limit States
@@ -911,7 +912,7 @@
             <span className="text-sm font-medium">{toast.message}</span>
           </div>
 
-          {}
+          {/* Sidebar Navigation - Desktop */}
           <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white border-r border-slate-800 shrink-0 select-none">
             <div className="p-5 border-b border-slate-800 flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-900 flex items-center justify-center font-black text-xl shadow-lg shadow-emerald-500/30">
@@ -1015,7 +1016,7 @@
             </div>
           </aside>
 
-          {}
+          {/* Mobile Bottom Navigation Bar */}
           <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-40 flex justify-around p-1 shadow-2xl">
             <button onClick={() => switchTab('pos')} className={`flex flex-col items-center justify-center p-1.5 w-full rounded-lg ${activeTab === 'pos' ? 'text-emerald-400' : 'text-slate-400'}`}>
               <i className="fas fa-shopping-cart text-base"></i>
@@ -1070,7 +1071,7 @@
 
             <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
 
-              {}
+              {/* POS Tab */}
               {activeTab === 'pos' && (
                 <div className="h-full flex flex-col lg:flex-row gap-5">
                   <div className="flex-1 flex flex-col min-w-0">
@@ -1248,7 +1249,7 @@
                 </div>
               )}
 
-              {}
+              {/* Pending WA Orders Tab */}
               {activeTab === 'pending' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1320,7 +1321,7 @@
                 </div>
               )}
 
-              {}
+              {/* Products Management Tab */}
               {activeTab === 'products' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200">
@@ -1338,14 +1339,32 @@
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
                     <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
-                      <input
-                        type="text"
-                        value={productSearch}
-                        onChange={(e) => setProductSearch(e.target.value)}
-                        placeholder="Cari produk berdasarkan SKU atau Nama..."
-                        className="w-full sm:w-72 px-3.5 py-2 border border-slate-200 rounded-xl text-xs"
-                      />
-                      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                      
+                      {/* Search Input and Category Filter Group */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1">
+                        <div className="relative flex-1">
+                          <i className="fas fa-search absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                          <input
+                            type="text"
+                            value={productSearch}
+                            onChange={(e) => setProductSearch(e.target.value)}
+                            placeholder="Cari SKU atau Nama Produk..."
+                            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                          />
+                        </div>
+                        <select
+                          value={prodCategoryFilter}
+                          onChange={(e) => setProdCategoryFilter(e.target.value)}
+                          className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 shrink-0 focus:ring-2 focus:ring-emerald-500/20"
+                        >
+                          <option value="Semua">Semua Jenis/Kategori</option>
+                          {categories.map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium shrink-0">
                         <span>Tampilkan:</span>
                         <select value={prodLimit} onChange={(e) => setProdLimit(e.target.value)} className="px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-bold text-slate-700">
                           <option value="5">5 Item</option>
@@ -1371,7 +1390,14 @@
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {sliceByLimit(products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku.toLowerCase().includes(productSearch.toLowerCase())), prodLimit).map(p => (
+                          {sliceByLimit(
+                            products.filter(p => {
+                              const matchesCat = prodCategoryFilter === 'Semua' || p.category === prodCategoryFilter;
+                              const matchesSearch = p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku.toLowerCase().includes(productSearch.toLowerCase());
+                              return matchesCat && matchesSearch;
+                            }),
+                            prodLimit
+                          ).map(p => (
                             <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                               <td className="p-4 font-mono font-bold text-slate-700">{p.sku}</td>
                               <td className="p-4 font-bold text-slate-800">{p.name}</td>
@@ -1405,7 +1431,7 @@
                 </div>
               )}
 
-              {}
+              {/* Stock Opname Tab */}
               {activeTab === 'opname' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200">
@@ -1574,7 +1600,7 @@
                 </div>
               )}
 
-              {}
+              {/* Sales History Tab */}
               {activeTab === 'history' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1675,7 +1701,7 @@
                 </div>
               )}
 
-              {}
+              {/* Financial & Stock Reports Tab */}
               {activeTab === 'reports' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1773,7 +1799,7 @@
                 </div>
               )}
 
-              {}
+              {/* Store & Admin Account Settings Tab */}
               {activeTab === 'settings' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200">
@@ -1937,7 +1963,7 @@
             </div>
           </main>
 
-          {}
+          {/* Modal Admin Login */}
           {isLoginModalOpen && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl border border-slate-200">
@@ -1983,7 +2009,7 @@
             </div>
           )}
 
-          {}
+          {/* Payment Modal */}
           {isPayModalOpen && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
@@ -2049,7 +2075,7 @@
             </div>
           )}
 
-          {}
+          {/* Add / Edit Product Modal */}
           {isProductModalOpen && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
@@ -2099,7 +2125,7 @@
             </div>
           )}
 
-          {}
+          {/* Restock Modal */}
           {isRestockModalOpen && restockProd && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl">
@@ -2132,7 +2158,7 @@
             </div>
           )}
 
-          {}
+          {/* Manage Categories Modal */}
           {isCategoryModalOpen && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl">
@@ -2175,7 +2201,7 @@
             </div>
           )}
 
-          {}
+          {/* Thermal Receipt Preview Modal */}
           {isReceiptModalOpen && currentTxToPrint && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
@@ -2244,7 +2270,7 @@
             </div>
           )}
 
-          {}
+          {/* Delete Confirmation Modal */}
           {deleteModal.isOpen && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl border border-slate-200">
