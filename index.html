@@ -3,62 +3,33 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Warung Aqilla - Sistem Kasir & Stok POS</title>
-
-  <!-- Favicon SVG Warung Aqilla (Emerald Store Icon) -->
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='25' fill='%2310b981'/><path fill='%23ffffff' d='M20 38h60v42H20z'/><path fill='%230f172a' d='M15 22l35-10 35 10v16H15z'/><path fill='%2310b981' d='M38 52h24v28H38z'/></svg>" />
+  <title>Warung Aqilla POS & Kasir</title>
+  
+  <!-- SVG Favicon Warung Aqilla -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><path fill='%2310b981' d='M256 0c17.7 0 32 14.3 32 32V64H448c17.7 0 32 14.3 32 32s-14.3 32-32 32H64C46.3 128 32 113.7 32 96S46.3 64 64 64H224V32c0-17.7 14.3-32 32-32zM32 192H480V448c0 35.3-28.7 64-64 64H96c-35.3 0-64-28.7-64-64V192zm160 80c0-8.8-7.2-16-16-16s-16 7.2-16 16v96c0 8.8 7.2 16 16 16s16-7.2 16-16V272zm112 0c0-8.8-7.2-16-16-16s-16 7.2-16 16v96c0 8.8 7.2 16 16 16s16-7.2 16-16V272z'/></svg>" />
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- FontAwesome CDN -->
+  <!-- FontAwesome Icons CDN -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-
-  <!-- React & Babel Standalone CDN -->
+  <!-- React & ReactDOM CDN -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel Standalone Compiler CDN -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- Firebase Compat SDK CDN -->
+  <!-- Firebase Compat Libraries for inline Browser React -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-
-  <!-- Thermal Printer Print Styles -->
-  <style>
-    @media print {
-      body > *:not(#printable-thermal-receipt) {
-        display: none !important;
-      }
-      #printable-thermal-receipt, #printable-thermal-receipt * {
-        display: block !important;
-        visibility: visible !important;
-      }
-      #printable-thermal-receipt {
-        position: absolute !important;
-        left: 0 !important;
-        top: 0 !important;
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        background: #ffffff !important;
-        color: #000000 !important;
-      }
-      @page {
-        margin: 0;
-      }
-    }
-  </style>
 </head>
-<body class="bg-slate-100 font-sans antialiased text-slate-800 min-h-screen">
+<body class="bg-slate-100 font-sans antialiased selection:bg-emerald-500 selection:text-white">
   <div id="root"></div>
 
+  <!-- React Application Core Script -->
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
-    // =========================================================================
-    // KUNCI FIREBASE RESMI WARUNG AQILLA:
-    // =========================================================================
+    // Official Firebase Config
     const firebaseConfig = {
       apiKey: "AIzaSyDVQOo1XmfacvFbCO5TW_RJ21vg270oii0",
       authDomain: "warung-aqilla.firebaseapp.com",
@@ -69,24 +40,21 @@
       measurementId: "G-QQVWKBK541"
     };
 
-    let isFirebaseReady = false;
     let db = null;
     let auth = null;
+    let isFirebaseReady = false;
 
     try {
       if (!firebase.apps.length) {
         firebase.initializeApp(firebaseConfig);
       }
-      db = firebase.firestore();
       auth = firebase.auth();
-      if (firebaseConfig.apiKey !== "demo-api-key") {
-        isFirebaseReady = true;
-      }
+      db = firebase.firestore();
+      isFirebaseReady = true;
     } catch (e) {
-      console.warn("Firebase running in Local Fallback mode");
+      console.warn("Firebase initialization warning (Fallback mode active):", e);
     }
 
-    // Default Storage Seeds
     const DEFAULT_PRODUCTS = [
       { id: '1', sku: 'PRD-001', name: 'Beras Premium 5kg', category: 'Sembako', buyPrice: 60000, sellPrice: 68000, stock: 15 },
       { id: '2', sku: 'PRD-002', name: 'Minyak Goreng 2L', category: 'Sembako', buyPrice: 28000, sellPrice: 32000, stock: 20 },
@@ -113,66 +81,53 @@
       return 'Rp ' + Math.floor(amount || 0).toLocaleString('id-ID');
     };
 
+    const formatWAPhone = (phone) => {
+      if (!phone) return '';
+      let clean = phone.replace(/[^0-9]/g, '');
+      if (clean.startsWith('0')) {
+        return '62' + clean.slice(1);
+      }
+      return clean;
+    };
+
     function App() {
-      // LocalStorage initializers fallback
-      const [products, setProducts] = useState(() => {
-        const saved = localStorage.getItem('wa_products');
-        return saved ? JSON.parse(saved) : DEFAULT_PRODUCTS;
-      });
-
-      const [categories, setCategories] = useState(() => {
-        const saved = localStorage.getItem('wa_categories');
-        return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
-      });
-
-      const [transactions, setTransactions] = useState(() => {
-        const saved = localStorage.getItem('wa_transactions');
-        return saved ? JSON.parse(saved) : [];
-      });
-
-      const [adminUsers, setAdminUsers] = useState(() => {
-        const saved = localStorage.getItem('wa_admins');
-        return saved ? JSON.parse(saved) : DEFAULT_ADMINS;
-      });
-
-      const [settings, setSettings] = useState(() => {
-        const saved = localStorage.getItem('wa_settings');
-        return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
-      });
-
-      const [opnameLogs, setOpnameLogs] = useState(() => {
-        const saved = localStorage.getItem('wa_opname_logs');
-        return saved ? JSON.parse(saved) : [];
-      });
-
-      // Interactive UI State
       const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
       const [activeTab, setActiveTab] = useState('pos');
+
+      // Main Data Collections
+      const [products, setProducts] = useState(DEFAULT_PRODUCTS);
+      const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+      const [transactions, setTransactions] = useState([]);
+      const [adminUsers, setAdminUsers] = useState(DEFAULT_ADMINS);
+      const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+      const [opnameLogs, setOpnameLogs] = useState([]);
+
+      // Shopping Cart
       const [cart, setCart] = useState([]);
       const [custName, setCustName] = useState('');
       const [custNote, setCustNote] = useState('');
 
-      // Search & Filters
+      // Search and Filter States
       const [selectedCategory, setSelectedCategory] = useState('Semua');
       const [posSearch, setPosSearch] = useState('');
       const [productSearch, setProductSearch] = useState('');
+      const [txMonthFilter, setTxMonthFilter] = useState('');
 
-      // Display Limit Filters
+      // Page Limit States
       const [prodLimit, setProdLimit] = useState('20');
       const [opnameLimit, setOpnameLimit] = useState('20');
-      const [historyLimit, setHistoryLimit] = useState('20');
+      const [txLimit, setTxLimit] = useState('20');
       const [topProdLimit, setTopProdLimit] = useState('5');
 
-      // Period Filters for Opname, History & Financial Reports
-      const [opnameSubTab, setOpnameSubTab] = useState('input');
-      const [opnameMonthFilter, setOpnameMonthFilter] = useState('Semua');
-      const [historyMonthFilter, setHistoryMonthFilter] = useState('Semua');
-      
-      const currentYearStr = new Date().getFullYear().toString();
-      const currentMonthStr = new Date().toISOString().slice(0, 7);
-      const [reportPeriodType, setReportPeriodType] = useState('all');
-      const [reportSelectedMonth, setReportSelectedMonth] = useState(currentMonthStr);
-      const [reportSelectedYear, setReportSelectedYear] = useState(currentYearStr);
+      // Laporan Keuangan Period Filter
+      const [reportPeriod, setReportPeriod] = useState('all'); // 'all', 'monthly', 'yearly'
+      const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7));
+      const [reportYear, setReportYear] = useState(new Date().getFullYear().toString());
+
+      // Opname State
+      const [opnameSubTab, setOpnameSubTab] = useState('live'); // 'live', 'archive'
+      const [opnamePhysical, setOpnamePhysical] = useState({});
+      const [opnameNotes, setOpnameNotes] = useState({});
 
       // Modals
       const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -181,9 +136,16 @@
       const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
       const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
       const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
-      const [deleteModal, setDeleteModal] = useState({ open: false, type: '', id: '', title: '' });
+      
+      // Custom Delete Confirmation Modal State
+      const [deleteModal, setDeleteModal] = useState({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: null
+      });
 
-      // Forms & Selections
+      // Specific Modal Forms
       const [loginInput, setLoginInput] = useState({ username: '', password: '' });
       const [selectedPayMethod, setSelectedPayMethod] = useState('Tunai');
       const [cashAmount, setCashAmount] = useState('');
@@ -193,79 +155,106 @@
       const [newCatInput, setNewCatInput] = useState('');
       const [currentTxToPrint, setCurrentTxToPrint] = useState(null);
       const [activePendingTxId, setActivePendingTxId] = useState(null);
+      const [pendingTargetTab, setPendingTargetTab] = useState(null);
 
-      // Opname & Settings Forms
-      const [opnamePhysical, setOpnamePhysical] = useState({});
-      const [opnameNotes, setOpnameNotes] = useState({});
+      // Admin & Settings Forms
       const [adminForm, setAdminForm] = useState({ index: -1, username: '', password: '' });
-      const [settingsForm, setSettingsForm] = useState(settings);
+      const [settingsForm, setSettingsForm] = useState(DEFAULT_SETTINGS);
 
-      // Toast Notification
+      // Toast Notifications
       const [toast, setToast] = useState({ show: false, message: '', isError: false });
 
-      // =========================================================================
-      // REAL-TIME CLOUD FIRESTORE SYNCHRONIZATION LISTENERS (LINTAS HP)
-      // =========================================================================
       useEffect(() => {
         if (!isFirebaseReady || !db || !auth) return;
 
-        auth.signInAnonymously().catch(err => console.warn("Anon Auth Error:", err));
+        let unsubProducts = () => {};
+        let unsubCategories = () => {};
+        let unsubTx = () => {};
+        let unsubSettings = () => {};
+        let unsubAdmins = () => {};
+        let unsubOpname = () => {};
 
-        // Listener 1: Products
-        const unsubProducts = db.collection('products').onSnapshot(snap => {
-          if (!snap.empty) {
-            const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setProducts(list);
-          } else {
-            DEFAULT_PRODUCTS.forEach(p => db.collection('products').doc(p.id).set(p));
+        const unsubAuth = auth.onAuthStateChanged(user => {
+          if (!user) {
+            auth.signInAnonymously().catch(err => console.warn("Anon Auth Error:", err));
+            return;
           }
-        });
 
-        // Listener 2: Categories
-        const unsubCategories = db.collection('categories').onSnapshot(snap => {
-          if (!snap.empty) {
-            const cats = snap.docs.map(doc => doc.data().name);
-            setCategories(cats);
-          } else {
-            DEFAULT_CATEGORIES.forEach(c => db.collection('categories').doc(c).set({ name: c }));
-          }
-        });
+          // Listener 1: Products
+          unsubProducts = db.collection('products').onSnapshot(
+            snap => {
+              if (!snap.empty) {
+                const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setProducts(list);
+              } else {
+                DEFAULT_PRODUCTS.forEach(p => db.collection('products').doc(p.id).set(p).catch(() => {}));
+              }
+            },
+            err => console.warn("Firestore Products permission warning:", err.message)
+          );
 
-        // Listener 3: Transactions
-        const unsubTx = db.collection('transactions').onSnapshot(snap => {
-          const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          list.sort((a, b) => new Date(b.date) - new Date(a.date));
-          setTransactions(list);
-        });
+          // Listener 2: Categories
+          unsubCategories = db.collection('categories').onSnapshot(
+            snap => {
+              if (!snap.empty) {
+                const cats = snap.docs.map(doc => doc.data().name);
+                setCategories(cats);
+              } else {
+                DEFAULT_CATEGORIES.forEach(c => db.collection('categories').doc(c).set({ name: c }).catch(() => {}));
+              }
+            },
+            err => console.warn("Firestore Categories permission warning:", err.message)
+          );
 
-        // Listener 4: Settings
-        const unsubSettings = db.collection('settings').doc('store_settings').onSnapshot(doc => {
-          if (doc.exists) {
-            setSettings(doc.data());
-            setSettingsForm(doc.data());
-          } else {
-            db.collection('settings').doc('store_settings').set(DEFAULT_SETTINGS);
-          }
-        });
+          // Listener 3: Transactions
+          unsubTx = db.collection('transactions').onSnapshot(
+            snap => {
+              const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              list.sort((a, b) => new Date(b.date) - new Date(a.date));
+              setTransactions(list);
+            },
+            err => console.warn("Firestore Transactions permission warning:", err.message)
+          );
 
-        // Listener 5: Admin Users
-        const unsubAdmins = db.collection('admins').onSnapshot(snap => {
-          if (!snap.empty) {
-            const admins = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setAdminUsers(admins);
-          } else {
-            DEFAULT_ADMINS.forEach(a => db.collection('admins').doc(a.id).set(a));
-          }
-        });
+          // Listener 4: Settings
+          unsubSettings = db.collection('settings').doc('store_settings').onSnapshot(
+            doc => {
+              if (doc.exists) {
+                setSettings(doc.data());
+                setSettingsForm(doc.data());
+              } else {
+                db.collection('settings').doc('store_settings').set(DEFAULT_SETTINGS).catch(() => {});
+              }
+            },
+            err => console.warn("Firestore Settings permission warning:", err.message)
+          );
 
-        // Listener 6: Opname Logs
-        const unsubOpname = db.collection('opname_logs').onSnapshot(snap => {
-          const logs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          logs.sort((a, b) => new Date(b.date) - new Date(a.date));
-          setOpnameLogs(logs);
+          // Listener 5: Admin Users
+          unsubAdmins = db.collection('admins').onSnapshot(
+            snap => {
+              if (!snap.empty) {
+                const admins = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                setAdminUsers(admins);
+              } else {
+                DEFAULT_ADMINS.forEach(a => db.collection('admins').doc(a.id).set(a).catch(() => {}));
+              }
+            },
+            err => console.warn("Firestore Admins permission warning:", err.message)
+          );
+
+          // Listener 6: Opname Logs
+          unsubOpname = db.collection('opname_logs').onSnapshot(
+            snap => {
+              const logs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              logs.sort((a, b) => new Date(b.date) - new Date(a.date));
+              setOpnameLogs(logs);
+            },
+            err => console.warn("Firestore Opname permission warning:", err.message)
+          );
         });
 
         return () => {
+          unsubAuth();
           unsubProducts();
           unsubCategories();
           unsubTx();
@@ -275,24 +264,31 @@
         };
       }, []);
 
-      // LocalStorage Backup Fallback
-      useEffect(() => { localStorage.setItem('wa_products', JSON.stringify(products)); }, [products]);
-      useEffect(() => { localStorage.setItem('wa_categories', JSON.stringify(categories)); }, [categories]);
-      useEffect(() => { localStorage.setItem('wa_transactions', JSON.stringify(transactions)); }, [transactions]);
-      useEffect(() => { localStorage.setItem('wa_admins', JSON.stringify(adminUsers)); }, [adminUsers]);
-      useEffect(() => { localStorage.setItem('wa_settings', JSON.stringify(settings)); }, [settings]);
-      useEffect(() => { localStorage.setItem('wa_opname_logs', JSON.stringify(opnameLogs)); }, [opnameLogs]);
-
       const showToast = (message, isError = false) => {
         setToast({ show: true, message, isError });
-        setTimeout(() => setToast({ show: false, message: '', isError: false }), 3000);
+        setTimeout(() => {
+          setToast({ show: false, message: '', isError: false });
+        }, 3000);
+      };
+
+      const openDeleteModal = (title, message, onConfirmCallback) => {
+        setDeleteModal({
+          isOpen: true,
+          title,
+          message,
+          onConfirm: () => {
+            onConfirmCallback();
+            setDeleteModal({ isOpen: false, title: '', message: '', onConfirm: null });
+          }
+        });
       };
 
       const switchTab = (tabId) => {
         const protectedTabs = ['pending', 'products', 'opname', 'history', 'reports', 'settings'];
         if (protectedTabs.includes(tabId) && !isAdminLoggedIn) {
+          setPendingTargetTab(tabId);
           setIsLoginModalOpen(true);
-          showToast('Silakan Login Admin untuk mengakses menu ini!', true);
+          showToast('Akses terbatas! Silakan Login Admin.', true);
           return;
         }
         setActiveTab(tabId);
@@ -301,7 +297,7 @@
       const toggleAdminAuth = () => {
         if (isAdminLoggedIn) {
           setIsAdminLoggedIn(false);
-          setActiveTab('pos');
+          switchTab('pos');
           showToast('Logout Admin berhasil.');
         } else {
           setIsLoginModalOpen(true);
@@ -320,6 +316,13 @@
           setCart([]);
           setLoginInput({ username: '', password: '' });
           showToast(`Selamat datang, ${matched.username}!`);
+          if (pendingTargetTab) {
+            const target = pendingTargetTab;
+            setPendingTargetTab(null);
+            setActiveTab(target);
+          } else {
+            setActiveTab('pos');
+          }
         } else {
           showToast('Username atau Password Admin salah!', true);
         }
@@ -398,7 +401,7 @@
           if (cartItem) {
             const newStk = Math.max(0, p.stock - cartItem.qty);
             if (isFirebaseReady && db) {
-              db.collection('products').doc(p.id).update({ stock: newStk });
+              db.collection('products').doc(p.id).update({ stock: newStk }).catch(e => console.warn("Stock update error:", e));
             }
             return { ...p, stock: newStk };
           }
@@ -422,17 +425,12 @@
         };
 
         if (isFirebaseReady && db) {
-          db.collection('transactions').doc(txId).set(newTx);
+          db.collection('transactions').doc(txId).set(newTx).catch(e => console.warn("Tx write error:", e));
         } else {
           setTransactions([newTx, ...transactions]);
         }
 
-        // WhatsApp redirect
-        let storePhone = settings.phone ? settings.phone.replace(/[^0-9]/g, '') : '';
-        if (storePhone.startsWith('0')) {
-          storePhone = '62' + storePhone.slice(1);
-        }
-
+        const storePhoneFormatted = formatWAPhone(settings.phone);
         let waText = `*HALO ${(settings.name || 'WARUNG AQILLA').toUpperCase()}*\n`;
         waText += `Saya ingin memesan produk berikut:\n\n`;
         waText += `*Detail Pelanggan:*\n`;
@@ -449,7 +447,7 @@
         waText += `Mohon konfirmasi ketersediaan dan cara pembayarannya. Terima kasih!`;
 
         const encodedText = encodeURIComponent(waText);
-        const waUrl = storePhone ? `https://wa.me/${storePhone}?text=${encodedText}` : `https://wa.me/?text=${encodedText}`;
+        const waUrl = storePhoneFormatted ? `https://wa.me/${storePhoneFormatted}?text=${encodedText}` : `https://wa.me/?text=${encodedText}`;
 
         window.open(waUrl, '_blank');
         clearCart();
@@ -498,20 +496,14 @@
               changeAmount,
               date: new Date().toISOString()
             };
-            if (isFirebaseReady && db) {
-              db.collection('transactions').doc(tx.id).set(tx);
-            } else {
-              setTransactions(transactions.map(t => t.id === tx.id ? tx : t));
-            }
           }
         } else {
-          // Deduct stock
           const updatedProducts = products.map(p => {
             const cartItem = cart.find(c => c.id === p.id);
             if (cartItem) {
               const newStk = Math.max(0, p.stock - cartItem.qty);
               if (isFirebaseReady && db) {
-                db.collection('products').doc(p.id).update({ stock: newStk });
+                db.collection('products').doc(p.id).update({ stock: newStk }).catch(e => console.warn("Stock update error:", e));
               }
               return { ...p, stock: newStk };
             }
@@ -532,11 +524,12 @@
             changeAmount,
             status: 'Lunas'
           };
-          if (isFirebaseReady && db) {
-            db.collection('transactions').doc(tx.id).set(tx);
-          } else {
-            setTransactions([tx, ...transactions]);
-          }
+        }
+
+        if (tx && isFirebaseReady && db) {
+          db.collection('transactions').doc(tx.id).set(tx).catch(e => console.warn("Tx write error:", e));
+        } else if (tx) {
+          setTransactions([tx, ...transactions.filter(t => t.id !== tx.id)]);
         }
 
         clearCart();
@@ -560,65 +553,49 @@
       };
 
       const cancelPendingOrder = (txId) => {
-        const tx = transactions.find(t => t.id === txId);
-        if (!tx) return;
+        openDeleteModal(
+          'Batalkan Pesanan Pending?',
+          `Apakah Anda yakin ingin membatalkan pesanan ${txId}? Stok barang akan dikembalikan.`,
+          () => {
+            const tx = transactions.find(t => t.id === txId);
+            if (!tx) return;
 
-        // Restore stock
-        const updatedProducts = products.map(p => {
-          const item = tx.items.find(i => i.id === p.id);
-          if (item) {
-            const restored = p.stock + item.qty;
+            const updatedProducts = products.map(p => {
+              const item = tx.items.find(i => i.id === p.id);
+              if (item) {
+                const restoredStock = p.stock + item.qty;
+                if (isFirebaseReady && db) {
+                  db.collection('products').doc(p.id).update({ stock: restoredStock }).catch(e => console.warn("Stock update error:", e));
+                }
+                return { ...p, stock: restoredStock };
+              }
+              return p;
+            });
+            setProducts(updatedProducts);
+
             if (isFirebaseReady && db) {
-              db.collection('products').doc(p.id).update({ stock: restored });
-            }
-            return { ...p, stock: restored };
-          }
-          return p;
-        });
-        setProducts(updatedProducts);
-
-        if (isFirebaseReady && db) {
-          db.collection('transactions').doc(txId).delete();
-        } else {
-          setTransactions(transactions.filter(t => t.id !== txId));
-        }
-        showToast(`Pesanan ${txId} dibatalkan dan stok dikembalikan.`);
-      };
-
-      const promptConfirmDelete = (type, id, title) => {
-        setDeleteModal({ open: true, type, id, title });
-      };
-
-      const executeDelete = () => {
-        const { type, id } = deleteModal;
-        if (type === 'transaction') {
-          if (isFirebaseReady && db) {
-            db.collection('transactions').doc(id).delete();
-          } else {
-            setTransactions(transactions.filter(t => t.id !== id));
-          }
-          showToast('Riwayat transaksi berhasil dihapus.');
-        } else if (type === 'product') {
-          if (isFirebaseReady && db) {
-            db.collection('products').doc(id).delete();
-          } else {
-            setProducts(products.filter(p => p.id !== id));
-          }
-          showToast('Produk berhasil dihapus.');
-        } else if (type === 'admin') {
-          if (adminUsers.length <= 1) {
-            showToast('Minimal harus ada 1 akun admin!', true);
-          } else {
-            const adminToDelete = adminUsers[id];
-            if (isFirebaseReady && db && adminToDelete?.id) {
-              db.collection('admins').doc(adminToDelete.id).delete();
+              db.collection('transactions').doc(txId).delete().catch(e => console.warn("Tx delete error:", e));
             } else {
-              setAdminUsers(adminUsers.filter((_, i) => i !== id));
+              setTransactions(transactions.filter(t => t.id !== txId));
             }
-            showToast('Akun admin berhasil dihapus.');
+            showToast(`Pesanan ${txId} dibatalkan dan stok dikembalikan.`);
           }
-        }
-        setDeleteModal({ open: false, type: '', id: '', title: '' });
+        );
+      };
+
+      const deleteTransactionRecord = (txId) => {
+        openDeleteModal(
+          'Hapus Riwayat Penjualan?',
+          `Apakah Anda yakin ingin menghapus data riwayat transaksi ${txId}? Tindakan ini tidak dapat dibatalkan.`,
+          () => {
+            if (isFirebaseReady && db) {
+              db.collection('transactions').doc(txId).delete().catch(e => console.warn("Tx delete error:", e));
+            } else {
+              setTransactions(transactions.filter(t => t.id !== txId));
+            }
+            showToast(`Riwayat transaksi ${txId} berhasil dihapus.`);
+          }
+        );
       };
 
       const handleSaveProduct = (e) => {
@@ -635,7 +612,7 @@
         const prodObj = { id: prodId, sku, name, category, buyPrice, sellPrice, stock };
 
         if (isFirebaseReady && db) {
-          db.collection('products').doc(prodId).set(prodObj);
+          db.collection('products').doc(prodId).set(prodObj).catch(e => console.warn("Product write error:", e));
         } else {
           if (editingProd) {
             setProducts(products.map(p => p.id === prodId ? prodObj : p));
@@ -649,17 +626,34 @@
         showToast(editingProd ? 'Produk berhasil diperbarui!' : 'Produk baru berhasil ditambahkan!');
       };
 
+      const handleDeleteProduct = (prodId) => {
+        openDeleteModal(
+          'Hapus Produk?',
+          'Apakah Anda yakin ingin menghapus produk ini dari katalog?',
+          () => {
+            if (isFirebaseReady && db) {
+              db.collection('products').doc(prodId).delete().catch(e => console.warn("Product delete error:", e));
+            } else {
+              setProducts(products.filter(p => p.id !== prodId));
+            }
+            showToast('Produk berhasil dihapus.');
+          }
+        );
+      };
+
       const handleSaveRestock = (e) => {
         e.preventDefault();
         if (!restockProd) return;
         const qty = parseInt(restockQty) || 0;
         if (qty <= 0) return;
 
-        const newStk = restockProd.stock + qty;
+        const newStock = restockProd.stock + qty;
+        const updated = { ...restockProd, stock: newStock };
+
         if (isFirebaseReady && db) {
-          db.collection('products').doc(restockProd.id).update({ stock: newStk });
+          db.collection('products').doc(restockProd.id).update({ stock: newStock }).catch(e => console.warn("Stock update error:", e));
         } else {
-          setProducts(products.map(p => p.id === restockProd.id ? { ...p, stock: newStk } : p));
+          setProducts(products.map(p => p.id === restockProd.id ? updated : p));
         }
 
         setIsRestockModalOpen(false);
@@ -677,12 +671,11 @@
           return;
         }
 
+        const newCats = [...categories, val];
+        setCategories(newCats);
         if (isFirebaseReady && db) {
-          db.collection('categories').doc(val).set({ name: val });
-        } else {
-          setCategories([...categories, val]);
+          db.collection('categories').doc(val).set({ name: val }).catch(e => console.warn("Category write error:", e));
         }
-
         setNewCatInput('');
         showToast(`Jenis "${val}" berhasil ditambahkan!`);
       };
@@ -692,71 +685,78 @@
           showToast('Minimal harus ada 1 jenis produk!', true);
           return;
         }
-        if (isFirebaseReady && db) {
-          db.collection('categories').doc(catName).delete();
-        } else {
-          setCategories(categories.filter(c => c !== catName));
-        }
-        showToast(`Jenis "${catName}" telah dihapus.`);
+        openDeleteModal(
+          'Hapus Jenis Produk?',
+          `Apakah Anda yakin ingin menghapus jenis/kategori "${catName}"?`,
+          () => {
+            const filtered = categories.filter(c => c !== catName);
+            setCategories(filtered);
+            if (isFirebaseReady && db) {
+              db.collection('categories').doc(catName).delete().catch(e => console.warn("Category delete error:", e));
+            }
+            showToast(`Jenis "${catName}" telah dihapus.`);
+          }
+        );
       };
 
       const saveStockOpname = () => {
         let count = 0;
-        const adjustedDetails = [];
+        const logItems = [];
 
         const updatedProducts = products.map((p, idx) => {
           const physVal = opnamePhysical[idx] !== undefined ? opnamePhysical[idx] : p.stock;
-          const noteVal = opnameNotes[idx] || '';
+          const noteVal = opnameNotes[idx] !== undefined ? opnameNotes[idx] : '';
           const diff = physVal - p.stock;
-          if (diff !== 0 || noteVal.trim() !== '') count++;
 
-          adjustedDetails.push({
+          logItems.push({
             id: p.id,
             sku: p.sku,
             name: p.name,
-            category: p.category,
             systemStock: p.stock,
             physicalStock: physVal,
-            diff,
+            difference: diff,
             note: noteVal
           });
 
-          if (isFirebaseReady && db) {
-            db.collection('products').doc(p.id).update({ stock: physVal });
+          if (physVal !== p.stock || noteVal) {
+            count++;
+            if (isFirebaseReady && db) {
+              db.collection('products').doc(p.id).update({ stock: physVal }).catch(e => console.warn("Stock update error:", e));
+            }
+            return { ...p, stock: physVal };
           }
-
-          return { ...p, stock: physVal };
+          return p;
         });
 
         const now = new Date();
         const logId = 'OPN-' + Date.now().toString().slice(-6);
-        const newLog = {
+        const monthYearStr = now.toLocaleString('id-ID', { month: 'long', year: 'numeric' });
+
+        const newOpnameLog = {
           id: logId,
           date: now.toISOString(),
-          monthYear: now.toISOString().slice(0, 7),
-          totalAdjustedItems: count,
-          items: adjustedDetails
+          monthYear: monthYearStr,
+          adjustedCount: count,
+          items: logItems
         };
 
         if (isFirebaseReady && db) {
-          db.collection('opname_logs').doc(logId).set(newLog);
+          db.collection('opname_logs').doc(logId).set(newOpnameLog).catch(e => console.warn("Opname log error:", e));
         } else {
-          setOpnameLogs([newLog, ...opnameLogs]);
-          setProducts(updatedProducts);
+          setOpnameLogs([newOpnameLog, ...opnameLogs]);
         }
 
-        setOpnamePhysical({});
+        setProducts(updatedProducts);
         setOpnameNotes({});
-        showToast(`Stok opname berhasil disimpan & dicatat ke arsip bulanan (${count} item disesuaikan)!`);
+        showToast(`Penyesuaian stok opname (${count} item) disimpan ke arsip & stok diperbarui!`);
       };
 
       const handleSaveSettings = (e) => {
         e.preventDefault();
         if (isFirebaseReady && db) {
-          db.collection('settings').doc('store_settings').set(settingsForm);
-        } else {
-          setSettings(settingsForm);
+          db.collection('settings').doc('store_settings').set(settingsForm).catch(e => console.warn("Settings write error:", e));
         }
+        setSettings(settingsForm);
         showToast('Pengaturan Toko Berhasil Disimpan!');
       };
 
@@ -771,57 +771,83 @@
         if (adminForm.index >= 0) {
           const target = adminUsers[adminForm.index];
           const updatedObj = { ...target, username: adminForm.username.trim(), password: adminForm.password.trim() };
-          if (isFirebaseReady && db && target?.id) {
-            db.collection('admins').doc(target.id).set(updatedObj);
-          } else {
-            updatedAdmins = adminUsers.map((u, i) => i === adminForm.index ? updatedObj : u);
-            setAdminUsers(updatedAdmins);
+          updatedAdmins = adminUsers.map((u, i) => i === adminForm.index ? updatedObj : u);
+          if (isFirebaseReady && db && target.id) {
+            db.collection('admins').doc(target.id).set(updatedObj).catch(e => console.warn("Admin update error:", e));
           }
         } else {
           const newAdminObj = { id: 'admin-' + Date.now(), username: adminForm.username.trim(), password: adminForm.password.trim() };
+          updatedAdmins = [...adminUsers, newAdminObj];
           if (isFirebaseReady && db) {
-            db.collection('admins').doc(newAdminObj.id).set(newAdminObj);
-          } else {
-            setAdminUsers([...adminUsers, newAdminObj]);
+            db.collection('admins').doc(newAdminObj.id).set(newAdminObj).catch(e => console.warn("Admin write error:", e));
           }
         }
 
+        setAdminUsers(updatedAdmins);
         setAdminForm({ index: -1, username: '', password: '' });
         showToast('Akun Admin berhasil diperbarui!');
+      };
+
+      const handleDeleteAdminAccount = (idx) => {
+        if (adminUsers.length <= 1) {
+          showToast('Minimal harus ada 1 akun admin!', true);
+          return;
+        }
+        const adminToDelete = adminUsers[idx];
+        openDeleteModal(
+          'Hapus Akun Admin?',
+          `Apakah Anda yakin ingin menghapus akun admin "${adminToDelete.username}"?`,
+          () => {
+            const filtered = adminUsers.filter((_, i) => i !== idx);
+            setAdminUsers(filtered);
+            if (isFirebaseReady && db && adminToDelete?.id) {
+              db.collection('admins').doc(adminToDelete.id).delete().catch(e => console.warn("Admin delete error:", e));
+            }
+            showToast('Akun admin berhasil dihapus.');
+          }
+        );
       };
 
       const pendingCount = useMemo(() => transactions.filter(t => t.status === 'Belum Bayar').length, [transactions]);
       const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0), [cart]);
 
+      const filteredTransactionsByMonth = useMemo(() => {
+        let list = transactions;
+        if (txMonthFilter) {
+          list = list.filter(t => {
+            const dateObj = new Date(t.date);
+            const yyyy = dateObj.getFullYear();
+            const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+            return `${yyyy}-${mm}` === txMonthFilter;
+          });
+        }
+        return list;
+      }, [transactions, txMonthFilter]);
+
       const financialStats = useMemo(() => {
-        const paidTxs = transactions.filter(t => {
-          if (t.status === 'Belum Bayar') return false;
-          const txDate = new Date(t.date);
-          if (isNaN(txDate.getTime())) return false;
+        let paidTxs = transactions.filter(t => t.status !== 'Belum Bayar');
 
-          const txYearStr = txDate.getFullYear().toString();
-          const txMonthStr = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}`;
-
-          if (reportPeriodType === 'monthly') {
-            return txMonthStr === reportSelectedMonth;
-          }
-          if (reportPeriodType === 'yearly') {
-            return txYearStr === reportSelectedYear;
-          }
-          return true;
-        });
+        if (reportPeriod === 'monthly') {
+          paidTxs = paidTxs.filter(t => {
+            const dateObj = new Date(t.date);
+            const yyyy = dateObj.getFullYear();
+            const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+            return `${yyyy}-${mm}` === reportMonth;
+          });
+        } else if (reportPeriod === 'yearly') {
+          paidTxs = paidTxs.filter(t => {
+            const yyyy = new Date(t.date).getFullYear().toString();
+            return yyyy === reportYear;
+          });
+        }
 
         const totalRevenue = paidTxs.reduce((sum, tx) => sum + (tx.totalPrice || 0), 0);
         const totalProfit = paidTxs.reduce((sum, tx) => sum + (tx.profit || 0), 0);
         
-        let totalStockValue = products.reduce((sum, p) => sum + ((p.buyPrice || 0) * (p.stock || 0)), 0);
-
-        if (reportPeriodType === 'yearly') {
-          const currentYearStr = new Date().getFullYear().toString();
-          if (reportSelectedYear !== currentYearStr || paidTxs.length === 0) {
-            totalStockValue = 0;
-          }
-        }
+        const isCurrentYear = reportYear === new Date().getFullYear().toString();
+        const totalStockValue = (reportPeriod === 'yearly' && !isCurrentYear) 
+          ? 0 
+          : products.reduce((sum, p) => sum + ((p.buyPrice || 0) * (p.stock || 0)), 0);
 
         const productSales = {};
         paidTxs.forEach(tx => {
@@ -839,7 +865,13 @@
           .sort((a, b) => b.qty - a.qty);
 
         return { totalRevenue, totalProfit, paidCount: paidTxs.length, totalStockValue, topProducts };
-      }, [transactions, products, reportPeriodType, reportSelectedMonth, reportSelectedYear]);
+      }, [transactions, products, reportPeriod, reportMonth, reportYear]);
+
+      const sliceByLimit = (items, limitStr) => {
+        if (limitStr === 'all') return items;
+        const num = parseInt(limitStr) || 20;
+        return items.slice(0, num);
+      };
 
       const printThermalReceipt = () => {
         window.print();
@@ -848,13 +880,38 @@
       return (
         <div className="bg-slate-100 text-slate-800 font-sans antialiased min-h-screen flex flex-col md:flex-row pb-16 md:pb-0">
           
-          {/* Toast Notification Banner */}
+          {/* Print CSS Injector for Thermal Receipt */}
+          <style>{`
+            @media print {
+              body > *:not(#printable-thermal-receipt) {
+                display: none !important;
+              }
+              #printable-thermal-receipt, #printable-thermal-receipt * {
+                display: block !important;
+                visibility: visible !important;
+              }
+              #printable-thermal-receipt {
+                display: block !important;
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: white !important;
+                color: black !important;
+              }
+              @page { margin: 0; }
+            }
+          `}</style>
+
+          {/* Floating Toast Notification */}
           <div className={`fixed top-4 right-4 z-50 transform transition-transform duration-300 ease-in-out bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-slate-700 pointer-events-none ${toast.show ? 'translate-x-0' : 'translate-x-full'}`}>
             <i className={`fas ${toast.isError ? 'fa-exclamation-circle text-rose-400' : 'fa-check-circle text-emerald-400'}`}></i>
             <span className="text-sm font-medium">{toast.message}</span>
           </div>
 
-          {/* Sidebar Navigation - Desktop */}
+          {}
           <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white border-r border-slate-800 shrink-0 select-none">
             <div className="p-5 border-b border-slate-800 flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-900 flex items-center justify-center font-black text-xl shadow-lg shadow-emerald-500/30">
@@ -952,39 +1009,42 @@
                   {isAdminLoggedIn ? 'Logout Admin' : 'Login Admin'}
                 </button>
               </div>
+              <div className="text-[11px] text-slate-500 text-center">
+                &copy; 2026 {settings.name}
+              </div>
             </div>
           </aside>
 
-          {/* Mobile Bottom Navigation Bar */}
-          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-40 flex justify-around p-1 shadow-2xl overflow-x-auto">
-            <button onClick={() => switchTab('pos')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'pos' ? 'text-emerald-400' : 'text-slate-400'}`}>
+          {}
+          <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 z-40 flex justify-around p-1 shadow-2xl">
+            <button onClick={() => switchTab('pos')} className={`flex flex-col items-center justify-center p-1.5 w-full rounded-lg ${activeTab === 'pos' ? 'text-emerald-400' : 'text-slate-400'}`}>
               <i className="fas fa-shopping-cart text-base"></i>
               <span className="text-[9px] mt-0.5 font-medium">Kasir</span>
             </button>
             {isAdminLoggedIn && (
               <>
-                <button onClick={() => switchTab('pending')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg relative ${activeTab === 'pending' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                <button onClick={() => switchTab('pending')} className={`flex flex-col items-center justify-center p-1.5 w-full rounded-lg relative ${activeTab === 'pending' ? 'text-emerald-400' : 'text-slate-400'}`}>
                   <i className="fas fa-clock text-base text-amber-400"></i>
                   <span className="text-[9px] mt-0.5 font-medium">Pending</span>
-                  <span className="absolute top-0.5 right-1 px-1 py-0.1 bg-amber-500 text-slate-900 rounded-full text-[8px] font-black">{pendingCount}</span>
+                  <span className="absolute top-0.5 right-1 px-1 py-0.2 bg-amber-500 text-slate-900 rounded-full text-[8px] font-black">{pendingCount}</span>
                 </button>
-                <button onClick={() => switchTab('products')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'products' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                <button onClick={() => switchTab('products')} className={`flex flex-col items-center justify-center p-1.5 w-full rounded-lg ${activeTab === 'products' ? 'text-emerald-400' : 'text-slate-400'}`}>
                   <i className="fas fa-boxes-stacked text-base"></i>
                   <span className="text-[9px] mt-0.5 font-medium">Produk</span>
                 </button>
-                <button onClick={() => switchTab('opname')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'opname' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                <button onClick={() => switchTab('opname')} className={`flex flex-col items-center justify-center p-1.5 w-full rounded-lg ${activeTab === 'opname' ? 'text-emerald-400' : 'text-slate-400'}`}>
                   <i className="fas fa-clipboard-check text-base"></i>
                   <span className="text-[9px] mt-0.5 font-medium">Opname</span>
                 </button>
-                <button onClick={() => switchTab('history')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'history' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                <button onClick={() => switchTab('history')} className={`flex flex-col items-center justify-center p-1.5 w-full rounded-lg ${activeTab === 'history' ? 'text-emerald-400' : 'text-slate-400'}`}>
                   <i className="fas fa-receipt text-base"></i>
                   <span className="text-[9px] mt-0.5 font-medium">Riwayat</span>
                 </button>
-                <button onClick={() => switchTab('reports')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'reports' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                <button onClick={() => switchTab('reports')} className={`flex flex-col items-center justify-center p-1.5 w-full rounded-lg ${activeTab === 'reports' ? 'text-emerald-400' : 'text-slate-400'}`}>
                   <i className="fas fa-chart-pie text-base"></i>
                   <span className="text-[9px] mt-0.5 font-medium">Laporan</span>
                 </button>
-                <button onClick={() => switchTab('settings')} className={`flex flex-col items-center justify-center p-1 min-w-[50px] w-full rounded-lg ${activeTab === 'settings' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                <button onClick={() => switchTab('settings')} className={`flex flex-col items-center justify-center p-1.5 w-full rounded-lg ${activeTab === 'settings' ? 'text-emerald-400' : 'text-slate-400'}`}>
                   <i className="fas fa-sliders text-base"></i>
                   <span className="text-[9px] mt-0.5 font-medium">Setelan</span>
                 </button>
@@ -992,10 +1052,8 @@
             )}
           </nav>
 
-          {/* Main Viewport */}
+          {/* Main Content Viewport */}
           <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-            
-            {/* Mobile Header */}
             <header className="md:hidden bg-slate-900 text-white p-4 border-b border-slate-800 flex items-center justify-between shadow-md">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-emerald-500 text-slate-900 flex items-center justify-center font-black">
@@ -1003,14 +1061,16 @@
                 </div>
                 <h1 className="font-bold text-base tracking-tight">{settings.name}</h1>
               </div>
-              <button onClick={toggleAdminAuth} className={`text-[11px] px-2.5 py-1 rounded-lg font-medium border ${isAdminLoggedIn ? 'bg-rose-950 border-rose-800 text-rose-300' : 'bg-slate-800 border-slate-700 text-emerald-400'}`}>
-                {isAdminLoggedIn ? 'Logout Admin' : 'Login Admin'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={toggleAdminAuth} className={`text-[11px] px-2.5 py-1 rounded-lg font-medium border ${isAdminLoggedIn ? 'bg-rose-950 border-rose-800 text-rose-300' : 'bg-slate-800 border-slate-700 text-emerald-400'}`}>
+                  {isAdminLoggedIn ? 'Logout Admin' : 'Login Admin'}
+                </button>
+              </div>
             </header>
 
             <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
 
-              {/* TAB 1: KASIR POS */}
+              {}
               {activeTab === 'pos' && (
                 <div className="h-full flex flex-col lg:flex-row gap-5">
                   <div className="flex-1 flex flex-col min-w-0">
@@ -1085,7 +1145,6 @@
                     </div>
                   </div>
 
-                  {/* Keranjang Belanja */}
                   <div className="w-full lg:w-96 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm flex flex-col shrink-0">
                     <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                       <div className="flex items-center gap-2">
@@ -1120,7 +1179,7 @@
                               <button onClick={() => updateCartQty(item.id, 1)} className="w-6 h-6 bg-white hover:bg-slate-200 border border-slate-300 rounded-lg flex items-center justify-center font-bold text-slate-700 text-xs">
                                 <i className="fas fa-plus text-[9px]"></i>
                               </button>
-                              <button onClick={() => removeFromCart(item.id)} className="w-6 h-6 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg flex items-center justify-center font-bold text-xs ml-1">
+                              <button onClick={() => removeFromCart(item.id)} className="w-6 h-6 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg flex items-center justify-center font-bold text-xs ml-1" title="Hapus">
                                 <i className="fas fa-trash-can text-[10px]"></i>
                               </button>
                             </div>
@@ -1189,7 +1248,7 @@
                 </div>
               )}
 
-              {/* TAB 2: PESANAN PENDING WA */}
+              {}
               {activeTab === 'pending' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1261,7 +1320,7 @@
                 </div>
               )}
 
-              {/* TAB 3: PRODUK & STOK */}
+              {}
               {activeTab === 'products' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200">
@@ -1284,23 +1343,20 @@
                         value={productSearch}
                         onChange={(e) => setProductSearch(e.target.value)}
                         placeholder="Cari produk berdasarkan SKU atau Nama..."
-                        className="w-full sm:w-80 px-3.5 py-2 border border-slate-200 rounded-xl text-xs"
+                        className="w-full sm:w-72 px-3.5 py-2 border border-slate-200 rounded-xl text-xs"
                       />
-                      <div className="flex items-center gap-2 justify-end">
-                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
-                        <select
-                          value={prodLimit}
-                          onChange={(e) => setProdLimit(e.target.value)}
-                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
-                        >
-                          <option value="5">5</option>
-                          <option value="20">20</option>
-                          <option value="50">50</option>
-                          <option value="100">100</option>
-                          <option value="semua">Semua</option>
+                      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                        <span>Tampilkan:</span>
+                        <select value={prodLimit} onChange={(e) => setProdLimit(e.target.value)} className="px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-bold text-slate-700">
+                          <option value="5">5 Item</option>
+                          <option value="20">20 Item</option>
+                          <option value="50">50 Item</option>
+                          <option value="100">100 Item</option>
+                          <option value="all">Semua</option>
                         </select>
                       </div>
                     </div>
+
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs text-slate-600">
                         <thead className="bg-slate-50 border-b border-slate-200 uppercase font-bold text-slate-500">
@@ -1315,9 +1371,7 @@
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku.toLowerCase().includes(productSearch.toLowerCase()))
-                            .slice(0, prodLimit === 'semua' ? undefined : parseInt(prodLimit))
-                            .map(p => (
+                          {sliceByLimit(products.filter(p => p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku.toLowerCase().includes(productSearch.toLowerCase())), prodLimit).map(p => (
                             <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                               <td className="p-4 font-mono font-bold text-slate-700">{p.sku}</td>
                               <td className="p-4 font-bold text-slate-800">{p.name}</td>
@@ -1331,13 +1385,13 @@
                               </td>
                               <td className="p-4 text-center">
                                 <div className="flex items-center justify-center gap-1.5">
-                                  <button onClick={() => { setRestockProd(p); setIsRestockModalOpen(true); }} className="p-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-xs font-bold" title="Tambah Stok">
-                                    <i className="fas fa-plus"></i>
+                                  <button onClick={() => { setRestockProd(p); setIsRestockModalOpen(true); }} className="px-2 py-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-xs font-bold flex items-center gap-1" title="Tambah Stok">
+                                    <i className="fas fa-plus text-[10px]"></i> Stok
                                   </button>
                                   <button onClick={() => { setEditingProd(p); setIsProductModalOpen(true); }} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold" title="Edit Produk">
                                     <i className="fas fa-pen"></i>
                                   </button>
-                                  <button onClick={() => promptConfirmDelete('product', p.id, p.name)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Produk">
+                                  <button onClick={() => handleDeleteProduct(p.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Produk">
                                     <i className="fas fa-trash"></i>
                                   </button>
                                 </div>
@@ -1351,72 +1405,69 @@
                 </div>
               )}
 
-              {/* TAB 4: STOK OPNAME */}
+              {}
               {activeTab === 'opname' && isAdminLoggedIn && (
                 <div className="space-y-4">
-                  <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3">
-                    <div>
-                      <h2 className="font-bold text-lg text-slate-800">Stok Opname</h2>
-                      <p className="text-xs text-slate-500">Sesuaikan jumlah stok barang fisik dengan catatan sistem dan simpan arsip rekap bulanan.</p>
-                    </div>
-                    <div className="flex gap-2 pt-1 border-t border-slate-100">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                    <h2 className="font-bold text-lg text-slate-800">Stok Opname</h2>
+                    <p className="text-xs text-slate-500">Sesuaikan jumlah stok barang fisik dengan catatan sistem serta simpan arsip penyesuaian bulanan.</p>
+
+                    <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
                       <button
-                        onClick={() => setOpnameSubTab('input')}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${opnameSubTab === 'input' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        onClick={() => setOpnameSubTab('live')}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${opnameSubTab === 'live' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       >
                         <i className="fas fa-edit mr-1.5"></i>Input Opname Live
                       </button>
                       <button
-                        onClick={() => setOpnameSubTab('logs')}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${opnameSubTab === 'logs' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        onClick={() => setOpnameSubTab('archive')}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${opnameSubTab === 'archive' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                       >
-                        <i className="fas fa-history mr-1.5"></i>Arsip Opname Bulanan
+                        <i className="fas fa-box-archive mr-1.5"></i>Arsip Opname Bulanan
                       </button>
                     </div>
                   </div>
 
-                  {opnameSubTab === 'input' ? (
-                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                      <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-                        <span className="text-xs font-bold text-slate-700">Form Penyesuaian Stok Fisik</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
-                          <select
-                            value={opnameLimit}
-                            onChange={(e) => setOpnameLimit(e.target.value)}
-                            className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
-                          >
-                            <option value="5">5</option>
-                            <option value="20">20</option>
-                            <option value="50">50</option>
-                            <option value="100">100</option>
-                            <option value="semua">Semua</option>
+                  {opnameSubTab === 'live' ? (
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm space-y-4 p-4">
+                      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 border-b border-slate-100 pb-3">
+                        <span className="font-bold text-slate-800 text-xs">Formulir Penyesuaian Fisik Live</span>
+                        <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                          <span>Tampilkan:</span>
+                          <select value={opnameLimit} onChange={(e) => setOpnameLimit(e.target.value)} className="px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-bold text-slate-700">
+                            <option value="5">5 Item</option>
+                            <option value="20">20 Item</option>
+                            <option value="50">50 Item</option>
+                            <option value="100">100 Item</option>
+                            <option value="all">Semua</option>
                           </select>
                         </div>
                       </div>
+
                       <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs text-slate-600">
                           <thead className="bg-slate-50 border-b border-slate-200 uppercase font-bold text-slate-500">
                             <tr>
-                              <th className="p-4">SKU</th>
-                              <th className="p-4">Nama Produk</th>
-                              <th className="p-4 text-center">Stok Sistem</th>
-                              <th className="p-4 text-center">Stok Fisik</th>
-                              <th className="p-4 text-center">Selisih</th>
-                              <th className="p-4">Keterangan</th>
+                              <th className="p-3">SKU</th>
+                              <th className="p-3">Nama Produk</th>
+                              <th className="p-3 text-center">Stok Sistem</th>
+                              <th className="p-3 text-center">Stok Fisik</th>
+                              <th className="p-3 text-center">Selisih</th>
+                              <th className="p-3">Catatan Selisih</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {products.slice(0, opnameLimit === 'semua' ? undefined : parseInt(opnameLimit)).map((p, idx) => {
+                            {sliceByLimit(products, opnameLimit).map((p, idx) => {
                               const physVal = opnamePhysical[idx] !== undefined ? opnamePhysical[idx] : p.stock;
+                              const noteVal = opnameNotes[idx] !== undefined ? opnameNotes[idx] : '';
                               const diff = physVal - p.stock;
 
                               return (
                                 <tr key={p.id} className="hover:bg-slate-50">
-                                  <td className="p-4 font-mono font-bold text-slate-700">{p.sku}</td>
-                                  <td className="p-4 font-bold text-slate-800">{p.name}</td>
-                                  <td className="p-4 text-center font-bold text-slate-700">{p.stock} pcs</td>
-                                  <td className="p-4 text-center">
+                                  <td className="p-3 font-mono font-bold text-slate-700">{p.sku}</td>
+                                  <td className="p-3 font-bold text-slate-800">{p.name}</td>
+                                  <td className="p-3 text-center font-bold text-slate-700">{p.stock} pcs</td>
+                                  <td className="p-3 text-center">
                                     <input
                                       type="number"
                                       value={physVal}
@@ -1425,17 +1476,17 @@
                                       className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-center font-bold focus:ring-2 focus:ring-emerald-500/20"
                                     />
                                   </td>
-                                  <td className="p-4 text-center font-bold">
+                                  <td className="p-3 text-center font-bold">
                                     <span className={diff > 0 ? 'text-emerald-600' : diff < 0 ? 'text-rose-600' : 'text-slate-400'}>
                                       {diff > 0 ? `+${diff}` : `${diff}`}
                                     </span>
                                   </td>
-                                  <td className="p-4">
+                                  <td className="p-3">
                                     <input
                                       type="text"
-                                      value={opnameNotes[idx] || ''}
+                                      value={noteVal}
                                       onChange={(e) => setOpnameNotes({ ...opnameNotes, [idx]: e.target.value })}
-                                      placeholder="Catatan selisih..."
+                                      placeholder="Alasan/Catatan selisih..."
                                       className="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-xs"
                                     />
                                   </td>
@@ -1445,99 +1496,77 @@
                           </tbody>
                         </table>
                       </div>
-                      
-                      <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
-                        <span className="text-xs text-slate-500">Periksa kembali penyesuaian stok sebelum menyimpan ke sistem & arsip.</span>
-                        <button onClick={saveStockOpname} className="w-full sm:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center justify-center gap-2 transition-all">
+
+                      <div className="pt-3 border-t border-slate-100 flex justify-end">
+                        <button
+                          onClick={saveStockOpname}
+                          className="w-full sm:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center justify-center gap-2"
+                        >
                           <i className="fas fa-save"></i>
                           <span>Simpan Penyesuaian Stok Fisik</span>
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4 shadow-sm">
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-100">
-                        <div>
-                          <h3 className="font-bold text-slate-800 text-sm">Riwayat Arsip Opname Bulanan</h3>
-                          <p className="text-[11px] text-slate-500">Arsip terbaru ditampilkan paling depan. Geser ke kanan / kiri untuk melihat arsip terdahulu.</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Filter Bulan:</span>
-                          <input
-                            type="month"
-                            value={opnameMonthFilter === 'Semua' ? '' : opnameMonthFilter}
-                            onChange={(e) => setOpnameMonthFilter(e.target.value || 'Semua')}
-                            className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
-                          />
-                          {opnameMonthFilter !== 'Semua' && (
-                            <button onClick={() => setOpnameMonthFilter('Semua')} className="text-xs text-emerald-600 font-bold hover:underline">
-                              Tampilkan Semua
-                            </button>
-                          )}
-                        </div>
+                    <div className="space-y-4">
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                        <h3 className="font-bold text-slate-800 text-sm mb-1">Riwayat Log Opname Bulanan</h3>
+                        <p className="text-xs text-slate-500">Geser kesamping untuk melihat rekaman arsip opname terdahulu.</p>
                       </div>
 
-                      {opnameLogs.filter(log => opnameMonthFilter === 'Semua' || log.monthYear === opnameMonthFilter).length === 0 ? (
-                        <div className="py-12 text-center text-slate-400">
-                          <i className="fas fa-box-open text-4xl mb-2 text-slate-300"></i>
-                          <p className="text-xs font-bold">Belum ada arsip opname untuk periode ini</p>
-                          <p className="text-[11px]">Lakukan simpan opname pada tab 'Input Opname Live' untuk mencatat arsip baru.</p>
+                      {opnameLogs.length === 0 ? (
+                        <div className="py-12 bg-white rounded-2xl border border-slate-200 text-center text-slate-400">
+                          <i className="fas fa-box-archive text-4xl mb-2 text-slate-300"></i>
+                          <p className="text-xs font-bold">Belum ada arsip stok opname</p>
+                          <p className="text-[11px]">Tekan "Simpan Penyesuaian Stok Fisik" untuk membuat rekaman arsip pertama.</p>
                         </div>
                       ) : (
-                        <div className="relative">
-                          <div className="flex gap-4 overflow-x-auto snap-x snap-mandatory pb-4 pt-1 px-1 scrollbar-thin">
-                            {opnameLogs.filter(log => opnameMonthFilter === 'Semua' || log.monthYear === opnameMonthFilter).map((log, logIdx) => (
-                              <div key={log.id} className="min-w-[88%] sm:min-w-[480px] shrink-0 snap-center border border-slate-200 rounded-2xl p-4 space-y-3 bg-slate-50/80 shadow-sm relative">
-                                <div className="flex justify-between items-center text-xs pb-2 border-b border-slate-200/80">
+                        <div className="flex gap-4 overflow-x-auto pb-4 pt-1 snap-x snap-mandatory">
+                          {opnameLogs.map((log, idx) => (
+                            <div key={log.id} className="min-w-[320px] sm:min-w-[420px] max-w-[480px] bg-white rounded-2xl border border-slate-200 shadow-sm p-4 snap-start shrink-0 space-y-3">
+                              <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                                <div>
                                   <div className="flex items-center gap-2">
-                                    <span className="font-mono font-bold text-slate-800">{log.id}</span>
-                                    {logIdx === 0 && (
-                                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-md text-[10px] flex items-center gap-1">
-                                        <i className="fas fa-star text-[9px]"></i> Terbaru
-                                      </span>
-                                    )}
+                                    <span className="font-mono font-bold text-xs text-slate-800">{log.id}</span>
+                                    {idx === 0 && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-full text-[10px]">Terbaru</span>}
                                   </div>
-                                  <span className="text-slate-500">{new Date(log.date).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                                </div>
-                                <div className="flex justify-between items-center text-xs">
-                                  <span className="text-slate-600 font-medium">Total Disesuaikan:</span>
-                                  <span className="px-2.5 py-0.5 bg-slate-200 text-slate-800 font-bold rounded-full text-[10px]">
-                                    {log.totalAdjustedItems} Item
+                                  <span className="text-[11px] text-slate-400 block mt-0.5">
+                                    {new Date(log.date).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
                                   </span>
                                 </div>
-                                <div className="overflow-x-auto max-h-60 overflow-y-auto rounded-xl border border-slate-200/80">
-                                  <table className="w-full text-left text-[11px] bg-white">
-                                    <thead className="bg-slate-100 text-slate-500 font-bold uppercase sticky top-0">
-                                      <tr>
-                                        <th className="p-2">SKU / Produk</th>
-                                        <th className="p-2 text-center">Sistem</th>
-                                        <th className="p-2 text-center">Fisik</th>
-                                        <th className="p-2 text-center">Selisih</th>
-                                        <th className="p-2">Catatan</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                      {log.items.map((item, i) => (
-                                        <tr key={i}>
-                                          <td className="p-2 font-bold text-slate-800">{item.name} <span className="text-[10px] text-slate-400 font-mono">({item.sku})</span></td>
-                                          <td className="p-2 text-center text-slate-600">{item.systemStock}</td>
-                                          <td className="p-2 text-center font-bold text-slate-800">{item.physicalStock}</td>
-                                          <td className={`p-2 text-center font-bold ${item.diff > 0 ? 'text-emerald-600' : item.diff < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
-                                            {item.diff > 0 ? `+${item.diff}` : item.diff}
-                                          </td>
-                                          <td className="p-2 text-slate-600">{item.note || '-'}</td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
+                                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-bold rounded-lg text-xs">
+                                  {log.adjustedCount} Item Disesuaikan
+                                </span>
                               </div>
-                            ))}
-                          </div>
-                          <div className="text-center text-[11px] text-slate-400 font-medium pt-1 flex items-center justify-center gap-1">
-                            <i className="fas fa-arrows-left-right text-emerald-600"></i>
-                            <span>Geser ke kanan / kiri untuk melihat arsip opname lainnya</span>
-                          </div>
+
+                              <div className="overflow-x-auto max-h-60 overflow-y-auto rounded-xl border border-slate-100">
+                                <table className="w-full text-left text-[11px]">
+                                  <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b border-slate-200">
+                                    <tr>
+                                      <th className="p-2">Produk</th>
+                                      <th className="p-2 text-center">Sistem</th>
+                                      <th className="p-2 text-center">Fisik</th>
+                                      <th className="p-2 text-center">Selisih</th>
+                                      <th className="p-2">Catatan</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {log.items.map((item, iIdx) => (
+                                      <tr key={iIdx}>
+                                        <td className="p-2 font-bold text-slate-800">{item.name}</td>
+                                        <td className="p-2 text-center text-slate-500">{item.systemStock}</td>
+                                        <td className="p-2 text-center font-bold text-slate-800">{item.physicalStock}</td>
+                                        <td className={`p-2 text-center font-bold ${item.difference > 0 ? 'text-emerald-600' : item.difference < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                                          {item.difference > 0 ? `+${item.difference}` : item.difference}
+                                        </td>
+                                        <td className="p-2 text-slate-500 italic">{item.note || '-'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -1545,45 +1574,45 @@
                 </div>
               )}
 
-              {/* TAB 5: RIWAYAT PENJUALAN */}
+              {}
               {activeTab === 'history' && isAdminLoggedIn && (
                 <div className="space-y-4">
-                  <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                    <h2 className="font-bold text-lg text-slate-800">Riwayat Penjualan</h2>
-                    <p className="text-xs text-slate-500">Daftar seluruh transaksi yang telah terjadi di {settings.name}.</p>
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div>
+                      <h2 className="font-bold text-lg text-slate-800">Riwayat Penjualan</h2>
+                      <p className="text-xs text-slate-500">Daftar seluruh transaksi yang telah terjadi di {settings.name}.</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="month"
+                        value={txMonthFilter}
+                        onChange={(e) => setTxMonthFilter(e.target.value)}
+                        className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
+                      />
+                      {txMonthFilter && (
+                        <button onClick={() => setTxMonthFilter('')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">
+                          Semua Bulan
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Filter Bulan:</span>
-                        <input
-                          type="month"
-                          value={historyMonthFilter === 'Semua' ? '' : historyMonthFilter}
-                          onChange={(e) => setHistoryMonthFilter(e.target.value || 'Semua')}
-                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
-                        />
-                        {historyMonthFilter !== 'Semua' && (
-                          <button onClick={() => setHistoryMonthFilter('Semua')} className="text-xs text-emerald-600 font-bold hover:underline">
-                            Semua Bulan
-                          </button>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
-                        <select
-                          value={historyLimit}
-                          onChange={(e) => setHistoryLimit(e.target.value)}
-                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
-                        >
-                          <option value="5">5</option>
-                          <option value="20">20</option>
-                          <option value="50">50</option>
-                          <option value="100">100</option>
-                          <option value="semua">Semua</option>
+                    <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+                      <span className="font-bold text-slate-800 text-xs">Daftar Transaksi Penjualan</span>
+                      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                        <span>Tampilkan:</span>
+                        <select value={txLimit} onChange={(e) => setTxLimit(e.target.value)} className="px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-bold text-slate-700">
+                          <option value="5">5 Item</option>
+                          <option value="20">20 Item</option>
+                          <option value="50">50 Item</option>
+                          <option value="100">100 Item</option>
+                          <option value="all">Semua</option>
                         </select>
                       </div>
                     </div>
+
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs text-slate-600">
                         <thead className="bg-slate-50 border-b border-slate-200 uppercase font-bold text-slate-500">
@@ -1593,17 +1622,14 @@
                             <th className="p-4 text-center">Jumlah Item</th>
                             <th className="p-4 text-right">Total Transaksi</th>
                             <th className="p-4 text-center">Pembayaran</th>
-                            <th className="p-4 text-center">Aksi / Struk</th>
+                            <th className="p-4 text-center">Aksi</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {transactions.filter(tx => historyMonthFilter === 'Semua' || tx.date.startsWith(historyMonthFilter)).length === 0 ? (
-                            <tr><td colSpan="6" className="p-8 text-center text-slate-400">Belum ada riwayat transaksi penjualan pada periode ini.</td></tr>
+                          {sliceByLimit(filteredTransactionsByMonth, txLimit).length === 0 ? (
+                            <tr><td colSpan="6" className="p-8 text-center text-slate-400">Belum ada riwayat transaksi penjualan untuk periode ini.</td></tr>
                           ) : (
-                            transactions
-                              .filter(tx => historyMonthFilter === 'Semua' || tx.date.startsWith(historyMonthFilter))
-                              .slice(0, historyLimit === 'semua' ? undefined : parseInt(historyLimit))
-                              .map(tx => {
+                            sliceByLimit(filteredTransactionsByMonth, txLimit).map(tx => {
                               const dateStr = new Date(tx.date).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
                               const totalItems = tx.items.reduce((s, i) => s + i.qty, 0);
                               const isPending = tx.status === 'Belum Bayar';
@@ -1633,7 +1659,7 @@
                                           <i className="fas fa-print"></i> Struk
                                         </button>
                                       )}
-                                      <button onClick={() => promptConfirmDelete('transaction', tx.id, tx.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Transaksi">
+                                      <button onClick={() => deleteTransactionRecord(tx.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Riwayat">
                                         <i className="fas fa-trash"></i>
                                       </button>
                                     </div>
@@ -1649,55 +1675,44 @@
                 </div>
               )}
 
-              {/* TAB 6: LAPORAN KEUANGAN */}
+              {}
               {activeTab === 'reports' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                     <div>
                       <h2 className="font-bold text-lg text-slate-800">Laporan Keuangan & Stok</h2>
-                      <p className="text-xs text-slate-500">Ringkasan estimasi omset, laba bersih, dan nilai total stok barang per periode.</p>
+                      <p className="text-xs text-slate-500">Ringkasan estimasi omset, laba bersih, dan nilai total stok barang.</p>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
-                        <button
-                          onClick={() => setReportPeriodType('all')}
-                          className={`px-3 py-1.5 rounded-lg transition-all ${reportPeriodType === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-                        >
-                          Semua Waktu
-                        </button>
-                        <button
-                          onClick={() => setReportPeriodType('monthly')}
-                          className={`px-3 py-1.5 rounded-lg transition-all ${reportPeriodType === 'monthly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-                        >
-                          Laporan Bulanan
-                        </button>
-                        <button
-                          onClick={() => setReportPeriodType('yearly')}
-                          className={`px-3 py-1.5 rounded-lg transition-all ${reportPeriodType === 'yearly' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-                        >
-                          Laporan Tahunan
-                        </button>
-                      </div>
+                      <select
+                        value={reportPeriod}
+                        onChange={(e) => setReportPeriod(e.target.value)}
+                        className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold bg-white"
+                      >
+                        <option value="all">Semua Waktu</option>
+                        <option value="monthly">Laporan Bulanan</option>
+                        <option value="yearly">Laporan Tahunan</option>
+                      </select>
 
-                      {reportPeriodType === 'monthly' && (
+                      {reportPeriod === 'monthly' && (
                         <input
                           type="month"
-                          value={reportSelectedMonth}
-                          onChange={(e) => setReportSelectedMonth(e.target.value)}
-                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
+                          value={reportMonth}
+                          onChange={(e) => setReportMonth(e.target.value)}
+                          className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
                         />
                       )}
 
-                      {reportPeriodType === 'yearly' && (
+                      {reportPeriod === 'yearly' && (
                         <select
-                          value={reportSelectedYear}
-                          onChange={(e) => setReportSelectedYear(e.target.value)}
-                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
+                          value={reportYear}
+                          onChange={(e) => setReportYear(e.target.value)}
+                          className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
                         >
-                          {['2024', '2025', '2026', '2027'].map(yr => (
-                            <option key={yr} value={yr}>Tahun {yr}</option>
-                          ))}
+                          <option value="2026">Tahun 2026</option>
+                          <option value="2025">Tahun 2025</option>
+                          <option value="2027">Tahun 2027</option>
                         </select>
                       )}
                     </div>
@@ -1722,31 +1737,25 @@
                     </div>
                   </div>
 
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
-                      <h3 className="font-bold text-slate-800 text-sm">Produk Terlaris Periode Ini</h3>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Tampilkan:</span>
-                        <select
-                          value={topProdLimit}
-                          onChange={(e) => setTopProdLimit(e.target.value)}
-                          className="px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 focus:ring-2 focus:ring-emerald-500/20"
-                        >
-                          <option value="5">5</option>
-                          <option value="20">20</option>
-                          <option value="50">50</option>
-                          <option value="100">100</option>
-                          <option value="semua">Semua</option>
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                      <h3 className="font-bold text-slate-800 text-sm">Produk Terlaris</h3>
+                      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                        <span>Tampilkan:</span>
+                        <select value={topProdLimit} onChange={(e) => setTopProdLimit(e.target.value)} className="px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-bold text-slate-700">
+                          <option value="5">5 Item</option>
+                          <option value="20">20 Item</option>
+                          <option value="50">50 Item</option>
+                          <option value="all">Semua</option>
                         </select>
                       </div>
                     </div>
+
                     <div className="space-y-2">
-                      {financialStats.topProducts.length === 0 ? (
+                      {sliceByLimit(financialStats.topProducts, topProdLimit).length === 0 ? (
                         <p className="text-xs text-slate-400 py-2">Belum ada data penjualan lunas pada periode ini.</p>
                       ) : (
-                        financialStats.topProducts
-                          .slice(0, topProdLimit === 'semua' ? undefined : parseInt(topProdLimit))
-                          .map((p, idx) => (
+                        sliceByLimit(financialStats.topProducts, topProdLimit).map((p, idx) => (
                           <div key={idx} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs">
                             <div className="flex items-center gap-2.5">
                               <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-[10px]">{idx + 1}</span>
@@ -1764,23 +1773,23 @@
                 </div>
               )}
 
-              {/* TAB 7: PENGATURAN TOKO & AKUN ADMIN */}
+              {}
               {activeTab === 'settings' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                    <h2 className="font-bold text-lg text-slate-800">Pengaturan Toko & Akun Admin</h2>
-                    <p className="text-xs text-slate-500">Atur profil {settings.name}, spesifikasi printer thermal, serta kelola akun admin terdaftar.</p>
+                    <h2 className="font-bold text-lg text-slate-800">Pengaturan Toko & Pengguna Admin</h2>
+                    <p className="text-xs text-slate-500">Atur profil {settings.name}, spesifikasi kertas printer thermal, dan kelola akses akun admin.</p>
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                    {/* Form Pengaturan Profil Toko */}
+                    {/* Store Profile Settings Form */}
                     <form onSubmit={handleSaveSettings} className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4 shadow-sm">
                       <div className="border-b border-slate-100 pb-3">
                         <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
                           <i className="fas fa-store text-emerald-600"></i>
                           <span>Profil Toko & Printer</span>
                         </h3>
-                        <p className="text-xs text-slate-500">Informasi toko dan ukuran kertas printer thermal.</p>
+                        <p className="text-xs text-slate-500">Profil resmi yang tercetak di bagian atas struk thermal.</p>
                       </div>
 
                       <div>
@@ -1794,23 +1803,24 @@
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">No. Telepon / WhatsApp (Format Indonesia: 08xx / 628xx)</label>
-                        <input
-                          type="text"
-                          required
-                          value={settingsForm.phone}
-                          onChange={(e) => setSettingsForm({ ...settingsForm, phone: e.target.value })}
-                          placeholder="Contoh: 081234567890"
-                          className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
-                        />
-                      </div>
-                      <div>
                         <label className="block text-xs font-semibold text-slate-700 mb-1">Alamat Toko</label>
                         <input
                           type="text"
                           required
                           value={settingsForm.address}
                           onChange={(e) => setSettingsForm({ ...settingsForm, address: e.target.value })}
+                          className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          No. Telepon / WhatsApp <span className="text-slate-400 font-normal">(Contoh: 08123456789)</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={settingsForm.phone}
+                          onChange={(e) => setSettingsForm({ ...settingsForm, phone: e.target.value })}
                           className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-sm"
                         />
                       </div>
@@ -1839,7 +1849,7 @@
                       </button>
                     </form>
 
-                    {/* Akun Admin Management */}
+                    {/* Admin Accounts Management Card */}
                     <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4 shadow-sm">
                       <div className="border-b border-slate-100 pb-3">
                         <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
@@ -1907,7 +1917,7 @@
                                         <i className="fas fa-pen"></i>
                                       </button>
                                       {adminUsers.length > 1 && (
-                                        <button onClick={() => promptConfirmDelete('admin', idx, u.username)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Admin">
+                                        <button onClick={() => handleDeleteAdminAccount(idx)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Admin">
                                           <i className="fas fa-trash"></i>
                                         </button>
                                       )}
@@ -1927,7 +1937,7 @@
             </div>
           </main>
 
-          {/* Modal Login Admin */}
+          {}
           {isLoginModalOpen && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl border border-slate-200">
@@ -1979,7 +1989,7 @@
             </div>
           )}
 
-          {/* Modal Pembayaran Penjualan */}
+          {}
           {isPayModalOpen && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
@@ -2045,7 +2055,7 @@
             </div>
           )}
 
-          {/* Modal Tambah/Edit Produk */}
+          {}
           {isProductModalOpen && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
@@ -2095,7 +2105,7 @@
             </div>
           )}
 
-          {/* Modal Tambah Stok Cepat */}
+          {}
           {isRestockModalOpen && restockProd && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl">
@@ -2128,7 +2138,7 @@
             </div>
           )}
 
-          {/* Modal Kelola Jenis/Kategori */}
+          {}
           {isCategoryModalOpen && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl">
@@ -2171,32 +2181,7 @@
             </div>
           )}
 
-          {/* Modal Konfirmasi Hapus UI Custom */}
-          {deleteModal.open && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-xs w-full overflow-hidden shadow-2xl p-5 text-center space-y-4">
-                <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto text-xl">
-                  <i className="fas fa-exclamation-triangle"></i>
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-800 text-base">Konfirmasi Hapus</h3>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Apakah Anda yakin ingin menghapus <b>{deleteModal.title}</b>? Tindakan ini tidak dapat dibatalkan.
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => setDeleteModal({ open: false, type: '', id: '', title: '' })} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">
-                    Batal
-                  </button>
-                  <button onClick={executeDelete} className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md">
-                    Ya, Hapus
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Modal Struk Thermal */}
+          {}
           {isReceiptModalOpen && currentTxToPrint && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
@@ -2265,7 +2250,39 @@
             </div>
           )}
 
-          {/* Element Struk Thermal Tersembunyi untuk Window Print */}
+          {}
+          {deleteModal.isOpen && (
+            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl border border-slate-200">
+                <div className="p-4 bg-rose-600 text-white flex justify-between items-center">
+                  <h3 className="font-bold text-base flex items-center gap-2">
+                    <i className="fas fa-triangle-exclamation"></i>
+                    <span>{deleteModal.title}</span>
+                  </h3>
+                  <button onClick={() => setDeleteModal({ isOpen: false, title: '', message: '', onConfirm: null })} className="text-rose-200 hover:text-white text-xl">&times;</button>
+                </div>
+                <div className="p-5 space-y-4">
+                  <p className="text-xs text-slate-600 leading-relaxed">{deleteModal.message}</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setDeleteModal({ isOpen: false, title: '', message: '', onConfirm: null })}
+                      className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      onClick={deleteModal.onConfirm}
+                      className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md"
+                    >
+                      Ya, Hapus
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Hidden Thermal Receipt Element for Native Browser Print */}
           {currentTxToPrint && (
             <div id="printable-thermal-receipt" className="hidden">
               <div style={{ width: settings.paperWidth === '80mm' ? '76mm' : '54mm', margin: '0 auto', padding: '8px', fontFamily: 'monospace', fontSize: '11px', lineHeight: '1.2' }}>
@@ -2319,7 +2336,8 @@
       );
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
   </script>
 </body>
 </html>
