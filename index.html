@@ -759,6 +759,21 @@
         showToast(`Penyesuaian stok opname (${count} item) disimpan ke arsip & stok diperbarui!`);
       };
 
+      const deleteOpnameLog = (logId) => {
+        openDeleteModal(
+          'Hapus Log Opname?',
+          `Apakah Anda yakin ingin menghapus arsip log opname ${logId}? Tindakan ini tidak dapat dibatalkan.`,
+          () => {
+            if (isFirebaseReady && db) {
+              db.collection('opname_logs').doc(logId).delete().catch(e => console.warn("Opname log delete error:", e));
+            } else {
+              setOpnameLogs(opnameLogs.filter(l => l.id !== logId));
+            }
+            showToast(`Arsip opname ${logId} berhasil dihapus.`);
+          }
+        );
+      };
+
       const handleSaveSettings = (e) => {
         e.preventDefault();
         const updatedSettings = {
@@ -1708,9 +1723,14 @@
                                     {new Date(log.date).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
                                   </span>
                                 </div>
-                                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-bold rounded-lg text-xs">
-                                  {log.adjustedCount} Item Disesuaikan
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-bold rounded-lg text-xs">
+                                    {log.adjustedCount} Item Disesuaikan
+                                  </span>
+                                  <button onClick={() => deleteOpnameLog(log.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold transition-colors" title="Hapus Log Opname">
+                                    <i className="fas fa-trash-can"></i>
+                                  </button>
+                                </div>
                               </div>
 
                               <div className="overflow-x-auto max-h-60 overflow-y-auto rounded-xl border border-slate-100">
