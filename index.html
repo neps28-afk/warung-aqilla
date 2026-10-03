@@ -17,6 +17,8 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <!-- Babel Standalone Compiler CDN -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- SheetJS Excel Parser Library CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <!-- Firebase Compat Libraries -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
@@ -113,6 +115,8 @@
       const [productSearch, setProductSearch] = useState('');
       const [prodCategoryFilter, setProdCategoryFilter] = useState('Semua');
       const [txMonthFilter, setTxMonthFilter] = useState('');
+      const [txSearch, setTxSearch] = useState('');
+      const [opnameSearch, setOpnameSearch] = useState('');
 
       // Page Limit States
       const [prodLimit, setProdLimit] = useState('20');
@@ -137,6 +141,11 @@
       const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
       const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
       const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+      const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+      // Import Excel States
+      const [importPreviewData, setImportPreviewData] = useState([]);
+      const [importFileName, setImportFileName] = useState('');
       
       // Custom Delete Confirmation Modal State
       const [deleteModal, setDeleteModal] = useState({
@@ -711,9 +720,10 @@
         let count = 0;
         const logItems = [];
 
-        const updatedProducts = products.map((p, idx) => {
-          const physVal = opnamePhysical[idx] !== undefined ? opnamePhysical[idx] : p.stock;
-          const noteVal = opnameNotes[idx] !== undefined ? opnameNotes[idx] : '';
+        const updatedProducts = products.map((p) => {
+          // Keying by product ID guarantees robustness regardless of pagination or limits
+          const physVal = opnamePhysical[p.id] !== undefined ? opnamePhysical[p.id] : p.stock;
+          const noteVal = opnameNotes[p.id] !== undefined ? opnameNotes[p.id] : '';
           const diff = physVal - p.stock;
 
           logItems.push({
@@ -755,6 +765,7 @@
         }
 
         setProducts(updatedProducts);
+        setOpnamePhysical({});
         setOpnameNotes({});
         showToast(`Penyesuaian stok opname (${count} item) disimpan ke arsip & stok diperbarui!`);
       };
@@ -837,21 +848,154 @@
         );
       };
 
+      const downloadSampleTemplate = () => {
+        if (typeof XLSX === 'undefined') {
+          showToast('Pustaka Excel belum siap. Silakan muat ulang halaman.', true);
+          return;
+        }
+        const sampleData = [
+          { 'SKU': 'PRD-009', 'Nama Produk': 'Gula Merah 500g', 'Kategori': 'Sembako', 'Harga Beli': 9000, 'Harga Jual': 11000, 'Stok': 30 },
+          { 'SKU': 'PRD-010', 'Nama Produk': 'Susu UHT Cokelat 1L', 'Kategori': 'Minuman', 'Harga Beli': 16000, 'Harga Jual': 19000, 'Stok': 24 },
+          { 'SKU': 'PRD-011', 'Nama Produk': 'Garam Dapur 250g', 'Kategori': 'Bumbu', 'Harga Beli': 2000, 'Harga Jual': 3000, 'Stok': 50 }
+        ];
+        const ws = XLSX.utils.json_to_sheet(sampleData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Template_Produk");
+        XLSX.writeFile(wb, "Template_Import_Produk_Warung_Aqilla.xlsx");
+        showToast('Template Excel berhasil diunduh!');
+      };
+
+      const handleExcelFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (typeof XLSX === 'undefined') {
+          showToast('Pustaka Excel belum siap. Silakan muat ulang halaman.', true);
+          return;
+        }
+
+        setImportFileName(file.name);
+        const reader = new FileReader();
+
+        reader.onload = (evt) => {
+          try {
+            const bstr = evt.target.result;
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            const wsname = wb.SheetNames[0];
+            const ws = wb.Sheets[wsname];
+            const rawData = XLSX.utils.sheet_to_json(ws);
+
+            if (rawData.length === 0) {
+              showToast('File Excel / CSV kosong atau format tidak sesuai!', true);
+              return;
+            }
+
+            const parsed = rawData.map((row, idx) => {
+              const sku = row['SKU'] || row['sku'] || row['Kode'] || `PRD-IMP-${Date.now().toString().slice(-4)}-${idx}`;
+              const name = row['Nama Produk'] || row['Nama'] || row['name'] || row['Nama Barang'] || 'Produk Tanpa Nama';
+              const category = row['Kategori'] || row['category'] || row['Jenis'] || 'Umum';
+              const buyPrice = parseFloat(row['Harga Beli'] || row['Harga Modal'] || row['buyPrice'] || row['Modal']) || 0;
+              const sellPrice = parseFloat(row['Harga Jual'] || row['sellPrice'] || row['Harga']) || 0;
+              const stock = parseInt(row['Stok'] || row['stock'] || row['Jumlah']) || 0;
+
+              return {
+                id: 'imp-' + Date.now() + '-' + idx,
+                sku: String(sku).trim(),
+                name: String(name).trim(),
+                category: String(category).trim(),
+                buyPrice,
+                sellPrice,
+                stock
+              };
+            });
+
+            setImportPreviewData(parsed);
+            showToast(`${parsed.length} data produk berhasil dibaca dari file Excel!`);
+          } catch (err) {
+            console.error(err);
+            showToast('Gagal membaca file Excel/CSV! Pastikan format sesuai.', true);
+          }
+        };
+
+        reader.readAsBinaryString(file);
+      };
+
+      const processBulkImport = () => {
+        if (importPreviewData.length === 0) {
+          showToast('Belum ada data produk untuk di-import!', true);
+          return;
+        }
+
+        const newCats = [...categories];
+        importPreviewData.forEach(item => {
+          if (item.category && !newCats.includes(item.category)) {
+            newCats.push(item.category);
+            if (isFirebaseReady && db) {
+              db.collection('categories').doc(item.category).set({ name: item.category }).catch(e => console.warn("Cat sync error:", e));
+            }
+          }
+        });
+        setCategories(newCats);
+
+        const updatedProducts = [...products];
+        importPreviewData.forEach(item => {
+          const existingIdx = updatedProducts.findIndex(
+            p => p.sku.toLowerCase() === item.sku.toLowerCase() || p.name.toLowerCase() === item.name.toLowerCase()
+          );
+
+          const prodObj = {
+            id: existingIdx >= 0 ? updatedProducts[existingIdx].id : item.id,
+            sku: item.sku,
+            name: item.name,
+            category: item.category,
+            buyPrice: item.buyPrice,
+            sellPrice: item.sellPrice,
+            stock: item.stock
+          };
+
+          if (existingIdx >= 0) {
+            updatedProducts[existingIdx] = prodObj;
+          } else {
+            updatedProducts.push(prodObj);
+          }
+
+          if (isFirebaseReady && db) {
+            db.collection('products').doc(prodObj.id).set(prodObj).catch(e => console.warn("Product sync error:", e));
+          }
+        });
+
+        setProducts(updatedProducts);
+        setIsImportModalOpen(false);
+        setImportPreviewData([]);
+        setImportFileName('');
+        showToast(`Berhasil meng-import ${importPreviewData.length} produk ke katalog!`);
+      };
+
       const pendingCount = useMemo(() => transactions.filter(t => t.status === 'Belum Bayar').length, [transactions]);
       const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.sellPrice * item.qty), 0), [cart]);
 
-      const filteredTransactionsByMonth = useMemo(() => {
+      const filteredTransactions = useMemo(() => {
         let list = transactions;
         if (txMonthFilter) {
           list = list.filter(t => {
-            const dateObj = new Date(t.date);
-            const yyyy = dateObj.getFullYear();
-            const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-            return `${yyyy}-${mm}` === txMonthFilter;
+            try {
+              const dateObj = new Date(t.date);
+              const yyyy = dateObj.getFullYear();
+              const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+              return `${yyyy}-${mm}` === txMonthFilter;
+            } catch(e) {
+              return true;
+            }
           });
         }
+        if (txSearch.trim()) {
+          const q = txSearch.toLowerCase().trim();
+          list = list.filter(t => 
+            (t.id && t.id.toLowerCase().includes(q)) || 
+            (t.customerName && t.customerName.toLowerCase().includes(q))
+          );
+        }
         return list;
-      }, [transactions, txMonthFilter]);
+      }, [transactions, txMonthFilter, txSearch]);
 
       const financialStats = useMemo(() => {
         let paidTxs = transactions.filter(t => t.status !== 'Belum Bayar');
@@ -902,7 +1046,6 @@
         return items.slice(0, num);
       };
 
-      // Direct Web Bluetooth ESC/POS print for POS58B with standard window.print() fallback
       const printThermalReceipt = async () => {
         if (!currentTxToPrint) return;
 
@@ -957,22 +1100,16 @@
                 const encoder = new TextEncoder();
                 let bytes = [];
 
-                // Reset printer
-                bytes.push(0x1B, 0x40);
-
-                // Align Center
-                bytes.push(0x1B, 0x61, 0x01);
-                // Bold ON
-                bytes.push(0x1B, 0x45, 0x01);
+                bytes.push(0x1B, 0x40); // Reset printer
+                bytes.push(0x1B, 0x61, 0x01); // Align Center
+                bytes.push(0x1B, 0x45, 0x01); // Bold ON
                 bytes.push(...encoder.encode((settings.name || 'WARUNG AQILLA').toUpperCase() + '\n'));
-                // Bold OFF
-                bytes.push(0x1B, 0x45, 0x00);
+                bytes.push(0x1B, 0x45, 0x00); // Bold OFF
                 bytes.push(...encoder.encode((settings.address || '') + '\n'));
                 bytes.push(...encoder.encode('Telp/WA: ' + (settings.phone || '') + '\n'));
                 bytes.push(...encoder.encode('--------------------------------\n'));
 
-                // Align Left
-                bytes.push(0x1B, 0x61, 0x00);
+                bytes.push(0x1B, 0x61, 0x00); // Align Left
                 bytes.push(...encoder.encode('No: ' + currentTxToPrint.id + '\n'));
                 bytes.push(...encoder.encode('Waktu: ' + new Date(currentTxToPrint.date).toLocaleString('id-ID') + '\n'));
                 bytes.push(...encoder.encode('Pelanggan: ' + (currentTxToPrint.customerName || 'Pelanggan') + '\n'));
@@ -992,7 +1129,6 @@
 
                 bytes.push(...encoder.encode('--------------------------------\n'));
 
-                // Total
                 let totalLabel = 'TOTAL';
                 let totalVal = formatRupiah(currentTxToPrint.totalPrice);
                 let totalSpaces = Math.max(1, 32 - totalLabel.length - totalVal.length);
@@ -1011,9 +1147,7 @@
                 }
 
                 bytes.push(...encoder.encode('--------------------------------\n'));
-
-                // Center Align Footer
-                bytes.push(0x1B, 0x61, 0x01);
+                bytes.push(0x1B, 0x61, 0x01); // Center Align Footer
                 bytes.push(...encoder.encode((settings.footerMsg || 'Terima kasih!') + '\n\n\n\n'));
 
                 const uint8Array = new Uint8Array(bytes);
@@ -1033,11 +1167,10 @@
               }
             }
           } catch (btErr) {
-            console.warn("Bluetooth print canceled/fallback to browser print:", btErr);
+            console.warn("Bluetooth print fallback to browser print:", btErr);
           }
         }
 
-        // Native browser print fallback
         window.print();
       };
 
@@ -1234,7 +1367,7 @@
 
             <div className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
 
-              {/* POS Tab */}
+              {}
               {activeTab === 'pos' && (
                 <div className="h-full flex flex-col lg:flex-row gap-5">
                   <div className="flex-1 flex flex-col min-w-0">
@@ -1484,46 +1617,57 @@
                 </div>
               )}
 
-              {/* Products Management Tab */}
+              {}
               {activeTab === 'products' && isAdminLoggedIn && (
                 <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3">
                     <div>
                       <h2 className="font-bold text-lg text-slate-800">Manajemen Produk & Jenis</h2>
                       <p className="text-xs text-slate-500">Tambah produk baru, kelola jenis/kategori, harga modal, harga jual, dan stok barang.</p>
                     </div>
-                    <button
-                      onClick={() => { setEditingProd(null); setIsProductModalOpen(true); }}
-                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-2"
-                    >
-                      <i className="fas fa-plus"></i> Tambah Produk Baru
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        onClick={downloadSampleTemplate}
+                        className="px-3.5 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold rounded-xl text-xs border border-emerald-200 flex items-center gap-1.5 transition-all"
+                        title="Unduh Template Format Excel"
+                      >
+                        <i className="fas fa-file-excel text-emerald-600"></i> Unduh Template
+                      </button>
+                      <button
+                        onClick={() => { setImportPreviewData([]); setImportFileName(''); setIsImportModalOpen(true); }}
+                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-sm flex items-center gap-1.5 transition-all"
+                      >
+                        <i className="fas fa-file-import"></i> Import Excel / CSV
+                      </button>
+                      <button
+                        onClick={() => { setEditingProd(null); setIsProductModalOpen(true); }}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-2 transition-all"
+                      >
+                        <i className="fas fa-plus"></i> Tambah Produk Baru
+                      </button>
+                    </div>
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
                     <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
-                      
-                      {/* Search Input and Category Filter Group */}
                       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1">
-                        <div className="relative flex-1">
-                          <i className="fas fa-search absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                        <div className="relative flex-1 max-w-sm">
+                          <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
                           <input
                             type="text"
                             value={productSearch}
                             onChange={(e) => setProductSearch(e.target.value)}
-                            placeholder="Cari SKU atau Nama Produk..."
-                            className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                            placeholder="Cari produk berdasarkan SKU atau Nama..."
+                            className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                           />
                         </div>
                         <select
                           value={prodCategoryFilter}
                           onChange={(e) => setProdCategoryFilter(e.target.value)}
-                          className="px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700 shrink-0 focus:ring-2 focus:ring-emerald-500/20"
+                          className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
                         >
-                          <option value="Semua">Semua Jenis/Kategori</option>
-                          {categories.map(c => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
+                          <option value="Semua">Semua Kategori</option>
+                          {categories.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </div>
 
@@ -1560,33 +1704,44 @@
                               return matchesCat && matchesSearch;
                             }),
                             prodLimit
-                          ).map(p => (
-                            <tr key={p.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="p-4 font-mono font-bold text-slate-700">{p.sku}</td>
-                              <td className="p-4 font-bold text-slate-800">{p.name}</td>
-                              <td className="p-4"><span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-semibold rounded-lg text-xs">{p.category}</span></td>
-                              <td className="p-4 text-right text-slate-500 font-medium">{formatRupiah(p.buyPrice)}</td>
-                              <td className="p-4 text-right font-bold text-emerald-600">{formatRupiah(p.sellPrice)}</td>
-                              <td className="p-4 text-center">
-                                <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${p.stock > 10 ? 'bg-emerald-100 text-emerald-800' : p.stock > 0 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}>
-                                  {p.stock} pcs
-                                </span>
-                              </td>
-                              <td className="p-4 text-center">
-                                <div className="flex items-center justify-center gap-1.5">
-                                  <button onClick={() => { setRestockProd(p); setIsRestockModalOpen(true); }} className="px-2 py-1 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-xs font-bold flex items-center gap-1" title="Tambah Stok">
-                                    <i className="fas fa-plus text-[10px]"></i> Stok
-                                  </button>
-                                  <button onClick={() => { setEditingProd(p); setIsProductModalOpen(true); }} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold" title="Edit Produk">
-                                    <i className="fas fa-pen"></i>
-                                  </button>
-                                  <button onClick={() => handleDeleteProduct(p.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Produk">
-                                    <i className="fas fa-trash"></i>
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                          ).length === 0 ? (
+                            <tr><td colSpan="7" className="p-8 text-center text-slate-400">Tidak ada produk yang sesuai dengan kriteria pencarian.</td></tr>
+                          ) : (
+                            sliceByLimit(
+                              products.filter(p => {
+                                const matchesCat = prodCategoryFilter === 'Semua' || p.category === prodCategoryFilter;
+                                const matchesSearch = p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.sku.toLowerCase().includes(productSearch.toLowerCase());
+                                return matchesCat && matchesSearch;
+                              }),
+                              prodLimit
+                            ).map(p => (
+                              <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-4 font-mono font-bold text-slate-700">{p.sku}</td>
+                                <td className="p-4 font-bold text-slate-800">{p.name}</td>
+                                <td className="p-4"><span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-semibold rounded-lg text-xs">{p.category}</span></td>
+                                <td className="p-4 text-right text-slate-500 font-medium">{formatRupiah(p.buyPrice)}</td>
+                                <td className="p-4 text-right font-bold text-emerald-600">{formatRupiah(p.sellPrice)}</td>
+                                <td className="p-4 text-center">
+                                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${p.stock > 10 ? 'bg-emerald-100 text-emerald-800' : p.stock > 0 ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'}`}>
+                                    {p.stock} pcs
+                                  </span>
+                                </td>
+                                <td className="p-4 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <button onClick={() => { setRestockProd(p); setIsRestockModalOpen(true); }} className="p-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-xs font-bold" title="Tambah Stok">
+                                      <i className="fas fa-plus"></i>
+                                    </button>
+                                    <button onClick={() => { setEditingProd(p); setIsProductModalOpen(true); }} className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold" title="Edit Produk">
+                                      <i className="fas fa-pen"></i>
+                                    </button>
+                                    <button onClick={() => handleDeleteProduct(p.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Produk">
+                                      <i className="fas fa-trash"></i>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -1594,34 +1749,52 @@
                 </div>
               )}
 
-              {/* Stock Opname Tab */}
+              {}
               {activeTab === 'opname' && isAdminLoggedIn && (
                 <div className="space-y-4">
-                  <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                    <h2 className="font-bold text-lg text-slate-800">Stok Opname</h2>
-                    <p className="text-xs text-slate-500">Sesuaikan jumlah stok barang fisik dengan catatan sistem serta simpan arsip penyesuaian bulanan.</p>
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                      <div>
+                        <h2 className="font-bold text-lg text-slate-800">Stok Opname</h2>
+                        <p className="text-xs text-slate-500">Sesuaikan jumlah stok barang fisik dengan catatan sistem dan simpan ke arsip bulanan.</p>
+                      </div>
 
-                    <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
-                      <button
-                        onClick={() => setOpnameSubTab('live')}
-                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${opnameSubTab === 'live' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                      >
-                        <i className="fas fa-edit mr-1.5"></i>Input Opname Live
-                      </button>
-                      <button
-                        onClick={() => setOpnameSubTab('archive')}
-                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${opnameSubTab === 'archive' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                      >
-                        <i className="fas fa-box-archive mr-1.5"></i>Arsip Opname Bulanan
-                      </button>
+                      {/* Sub-tab Navigation Pill */}
+                      <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        <button
+                          onClick={() => setOpnameSubTab('live')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${opnameSubTab === 'live' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                        >
+                          <i className="fas fa-clipboard-list mr-1.5"></i>Input Opname Live
+                        </button>
+                        <button
+                          onClick={() => setOpnameSubTab('archive')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${opnameSubTab === 'archive' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                        >
+                          <i className="fas fa-box-archive text-amber-500"></i>
+                          <span>Arsip Opname Bulanan</span>
+                          <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 rounded-full text-[10px] font-black">{opnameLogs.length}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  {opnameSubTab === 'live' ? (
+                  {/* Sub-tab 1: Live Opname Form */}
+                  {opnameSubTab === 'live' && (
                     <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm space-y-4 p-4">
-                      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 border-b border-slate-100 pb-3">
-                        <span className="font-bold text-slate-800 text-xs">Formulir Penyesuaian Fisik Live</span>
-                        <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+                        <div className="relative flex-1 max-w-sm">
+                          <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                          <input
+                            type="text"
+                            value={opnameSearch}
+                            onChange={(e) => setOpnameSearch(e.target.value)}
+                            placeholder="Cari SKU atau Nama Produk untuk opname..."
+                            className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs text-slate-500 font-medium shrink-0">
                           <span>Tampilkan:</span>
                           <select value={opnameLimit} onChange={(e) => setOpnameLimit(e.target.value)} className="px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-bold text-slate-700">
                             <option value="5">5 Item</option>
@@ -1633,7 +1806,7 @@
                         </div>
                       </div>
 
-                      <div className="overflow-x-auto">
+                      <div className="overflow-x-auto border border-slate-100 rounded-xl">
                         <table className="w-full text-left text-xs text-slate-600">
                           <thead className="bg-slate-50 border-b border-slate-200 uppercase font-bold text-slate-500">
                             <tr>
@@ -1646,13 +1819,17 @@
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {sliceByLimit(products, opnameLimit).map((p, idx) => {
-                              const physVal = opnamePhysical[idx] !== undefined ? opnamePhysical[idx] : p.stock;
-                              const noteVal = opnameNotes[idx] !== undefined ? opnameNotes[idx] : '';
+                            {sliceByLimit(
+                              products.filter(p => p.name.toLowerCase().includes(opnameSearch.toLowerCase()) || p.sku.toLowerCase().includes(opnameSearch.toLowerCase())),
+                              opnameLimit
+                            ).map((p) => {
+                              // Keying by product ID guarantees robustness
+                              const physVal = opnamePhysical[p.id] !== undefined ? opnamePhysical[p.id] : p.stock;
+                              const noteVal = opnameNotes[p.id] !== undefined ? opnameNotes[p.id] : '';
                               const diff = physVal - p.stock;
 
                               return (
-                                <tr key={p.id} className="hover:bg-slate-50">
+                                <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                                   <td className="p-3 font-mono font-bold text-slate-700">{p.sku}</td>
                                   <td className="p-3 font-bold text-slate-800">{p.name}</td>
                                   <td className="p-3 text-center font-bold text-slate-700">{p.stock} pcs</td>
@@ -1661,8 +1838,8 @@
                                       type="number"
                                       value={physVal}
                                       min="0"
-                                      onChange={(e) => setOpnamePhysical({ ...opnamePhysical, [idx]: parseInt(e.target.value) || 0 })}
-                                      className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-center font-bold focus:ring-2 focus:ring-emerald-500/20"
+                                      onChange={(e) => setOpnamePhysical({ ...opnamePhysical, [p.id]: parseInt(e.target.value) || 0 })}
+                                      className="w-20 px-2 py-1 border border-slate-300 rounded-lg text-center font-bold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                                     />
                                   </td>
                                   <td className="p-3 text-center font-bold">
@@ -1674,8 +1851,8 @@
                                     <input
                                       type="text"
                                       value={noteVal}
-                                      onChange={(e) => setOpnameNotes({ ...opnameNotes, [idx]: e.target.value })}
-                                      placeholder="Alasan/Catatan selisih..."
+                                      onChange={(e) => setOpnameNotes({ ...opnameNotes, [p.id]: e.target.value })}
+                                      placeholder="Alasan selisih/rusak..."
                                       className="w-full px-2.5 py-1 border border-slate-200 rounded-lg text-xs"
                                     />
                                   </td>
@@ -1686,78 +1863,64 @@
                         </table>
                       </div>
 
-                      <div className="pt-3 border-t border-slate-100 flex justify-end">
+                      <div className="pt-2 flex justify-end">
                         <button
                           onClick={saveStockOpname}
-                          className="w-full sm:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center justify-center gap-2"
+                          className="w-full sm:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-lg flex items-center justify-center gap-2 transition-all"
                         >
-                          <i className="fas fa-save"></i>
+                          <i className="fas fa-save text-sm"></i>
                           <span>Simpan Penyesuaian Stok Fisik</span>
                         </button>
                       </div>
                     </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                        <h3 className="font-bold text-slate-800 text-sm mb-1">Riwayat Log Opname Bulanan</h3>
-                        <p className="text-xs text-slate-500">Geser kesamping untuk melihat rekaman arsip opname terdahulu.</p>
-                      </div>
+                  )}
 
+                  {/* Sub-tab 2: Archive Logs Carousel */}
+                  {opnameSubTab === 'archive' && (
+                    <div className="space-y-4">
                       {opnameLogs.length === 0 ? (
                         <div className="py-12 bg-white rounded-2xl border border-slate-200 text-center text-slate-400">
                           <i className="fas fa-box-archive text-4xl mb-2 text-slate-300"></i>
-                          <p className="text-xs font-bold">Belum ada arsip stok opname</p>
-                          <p className="text-[11px]">Tekan "Simpan Penyesuaian Stok Fisik" untuk membuat rekaman arsip pertama.</p>
+                          <p className="text-xs font-bold">Belum ada arsip log opname</p>
+                          <p className="text-[11px]">Lakukan simpan penyesuaian stok fisik untuk membuat rekam arsip baru.</p>
                         </div>
                       ) : (
-                        <div className="flex gap-4 overflow-x-auto pb-4 pt-1 snap-x snap-mandatory">
+                        <div className="flex gap-4 overflow-x-auto pb-4 pt-1 snap-x snap-mandatory pr-2">
                           {opnameLogs.map((log, idx) => (
-                            <div key={log.id} className="min-w-[320px] sm:min-w-[420px] max-w-[480px] bg-white rounded-2xl border border-slate-200 shadow-sm p-4 snap-start shrink-0 space-y-3">
-                              <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                            <div key={log.id} className="min-w-[320px] max-w-md bg-white p-4 rounded-2xl border border-slate-200 shadow-sm shrink-0 snap-start space-y-3">
+                              <div className="flex justify-between items-start border-b border-slate-100 pb-2.5">
                                 <div>
                                   <div className="flex items-center gap-2">
                                     <span className="font-mono font-bold text-xs text-slate-800">{log.id}</span>
-                                    {idx === 0 && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-full text-[10px]">Terbaru</span>}
+                                    {idx === 0 && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-full text-[9px]">Terbaru</span>}
                                   </div>
-                                  <span className="text-[11px] text-slate-400 block mt-0.5">
-                                    {new Date(log.date).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                                  <span className="text-[11px] text-slate-500 font-medium block mt-0.5">
+                                    <i className="fas fa-calendar-alt text-slate-400 mr-1"></i>{new Date(log.date).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
                                   </span>
                                 </div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="px-2.5 py-1 bg-slate-100 text-slate-700 font-bold rounded-lg text-xs">
-                                    {log.adjustedCount} Item Disesuaikan
-                                  </span>
-                                  <button onClick={() => deleteOpnameLog(log.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold transition-colors" title="Hapus Log Opname">
-                                    <i className="fas fa-trash-can"></i>
-                                  </button>
-                                </div>
+                                <button onClick={() => deleteOpnameLog(log.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Log">
+                                  <i className="fas fa-trash-can"></i>
+                                </button>
                               </div>
 
-                              <div className="overflow-x-auto max-h-60 overflow-y-auto rounded-xl border border-slate-100">
-                                <table className="w-full text-left text-[11px]">
-                                  <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b border-slate-200">
-                                    <tr>
-                                      <th className="p-2">Produk</th>
-                                      <th className="p-2 text-center">Sistem</th>
-                                      <th className="p-2 text-center">Fisik</th>
-                                      <th className="p-2 text-center">Selisih</th>
-                                      <th className="p-2">Catatan</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-100">
-                                    {log.items.map((item, iIdx) => (
-                                      <tr key={iIdx}>
-                                        <td className="p-2 font-bold text-slate-800">{item.name}</td>
-                                        <td className="p-2 text-center text-slate-500">{item.systemStock}</td>
-                                        <td className="p-2 text-center font-bold text-slate-800">{item.physicalStock}</td>
-                                        <td className={`p-2 text-center font-bold ${item.difference > 0 ? 'text-emerald-600' : item.difference < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
-                                          {item.difference > 0 ? `+${item.difference}` : item.difference}
-                                        </td>
-                                        <td className="p-2 text-slate-500 italic">{item.note || '-'}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="text-slate-500 font-medium">Item Disesuaikan</span>
+                                <span className="font-bold text-slate-800">{log.adjustedCount} produk</span>
+                              </div>
+
+                              <div className="max-h-48 overflow-y-auto border border-slate-100 rounded-xl bg-slate-50 p-2 space-y-1 text-[11px]">
+                                {log.items.map((item, itemIdx) => (
+                                  <div key={itemIdx} className="flex justify-between items-center bg-white p-1.5 rounded-lg border border-slate-200/60">
+                                    <div className="min-w-0 pr-2">
+                                      <span className="font-bold text-slate-800 block truncate">{item.name}</span>
+                                      <span className="text-[10px] text-slate-400">Sis: {item.systemStock} | Fisik: {item.physicalStock}</span>
+                                      {item.note && <span className="text-[10px] text-amber-700 block italic">{item.note}</span>}
+                                    </div>
+                                    <span className={`font-bold ${item.difference > 0 ? 'text-emerald-600' : item.difference < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                                      {item.difference > 0 ? `+${item.difference}` : `${item.difference}`}
+                                    </span>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           ))}
@@ -1768,7 +1931,7 @@
                 </div>
               )}
 
-              {/* Sales History Tab */}
+              {}
               {activeTab === 'history' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1777,25 +1940,37 @@
                       <p className="text-xs text-slate-500">Daftar seluruh transaksi yang telah terjadi di {settings.name}.</p>
                     </div>
 
+                    {/* Filters Bar */}
                     <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="month"
-                        value={txMonthFilter}
-                        onChange={(e) => setTxMonthFilter(e.target.value)}
-                        className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
-                      />
-                      {txMonthFilter && (
-                        <button onClick={() => setTxMonthFilter('')} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">
-                          Semua Bulan
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
+                        <i className="fas fa-calendar-day text-slate-400 text-xs ml-2"></i>
+                        <input
+                          type="month"
+                          value={txMonthFilter}
+                          onChange={(e) => setTxMonthFilter(e.target.value)}
+                          className="px-2 py-1 text-xs font-semibold bg-transparent border-0 focus:ring-0 text-slate-700"
+                        />
+                        {txMonthFilter && (
+                          <button onClick={() => setTxMonthFilter('')} className="text-slate-400 hover:text-rose-500 font-bold px-1.5" title="Reset Filter Bulan">&times;</button>
+                        )}
+                      </div>
                     </div>
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="p-4 border-b border-slate-100 flex justify-between items-center">
-                      <span className="font-bold text-slate-800 text-xs">Daftar Transaksi Penjualan</span>
-                      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                    <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+                      <div className="relative flex-1 max-w-sm">
+                        <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                        <input
+                          type="text"
+                          value={txSearch}
+                          onChange={(e) => setTxSearch(e.target.value)}
+                          placeholder="Cari No. Struk TRX atau Nama Pelanggan..."
+                          className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium shrink-0">
                         <span>Tampilkan:</span>
                         <select value={txLimit} onChange={(e) => setTxLimit(e.target.value)} className="px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white font-bold text-slate-700">
                           <option value="5">5 Item</option>
@@ -1820,12 +1995,16 @@
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {sliceByLimit(filteredTransactionsByMonth, txLimit).length === 0 ? (
-                            <tr><td colSpan="6" className="p-8 text-center text-slate-400">Belum ada riwayat transaksi penjualan untuk periode ini.</td></tr>
+                          {sliceByLimit(filteredTransactions, txLimit).length === 0 ? (
+                            <tr><td colSpan="6" className="p-8 text-center text-slate-400">Belum ada data riwayat transaksi penjualan yang sesuai.</td></tr>
                           ) : (
-                            sliceByLimit(filteredTransactionsByMonth, txLimit).map(tx => {
-                              const dateStr = new Date(tx.date).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
-                              const totalItems = tx.items.reduce((s, i) => s + i.qty, 0);
+                            sliceByLimit(filteredTransactions, txLimit).map(tx => {
+                              let dateStr = '-';
+                              try {
+                                dateStr = new Date(tx.date).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
+                              } catch(e) {}
+
+                              const totalItems = tx.items ? tx.items.reduce((s, i) => s + (i.qty || 0), 0) : 0;
                               const isPending = tx.status === 'Belum Bayar';
 
                               return (
@@ -1845,17 +2024,24 @@
                                   <td className="p-4 text-center">
                                     <div className="flex items-center justify-center gap-1.5">
                                       {isPending ? (
-                                        <button onClick={() => processPendingPayment(tx.id)} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg font-bold text-xs">
-                                          <i className="fas fa-credit-card"></i> Pelunasan
-                                        </button>
+                                        <>
+                                          <button onClick={() => processPendingPayment(tx.id)} className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-lg font-bold text-xs" title="Pelunasan">
+                                            <i className="fas fa-credit-card mr-1"></i> Pelunasan
+                                          </button>
+                                          <button onClick={() => cancelPendingOrder(tx.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Batalkan">
+                                            <i className="fas fa-times"></i>
+                                          </button>
+                                        </>
                                       ) : (
-                                        <button onClick={() => { setCurrentTxToPrint(tx); setIsReceiptModalOpen(true); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-xs flex items-center justify-center gap-1">
-                                          <i className="fas fa-print"></i> Struk
-                                        </button>
+                                        <>
+                                          <button onClick={() => { setCurrentTxToPrint(tx); setIsReceiptModalOpen(true); }} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-xs flex items-center gap-1">
+                                            <i className="fas fa-print"></i> Struk
+                                          </button>
+                                          <button onClick={() => deleteTransactionRecord(tx.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Riwayat">
+                                            <i className="fas fa-trash-can"></i>
+                                          </button>
+                                        </>
                                       )}
-                                      <button onClick={() => deleteTransactionRecord(tx.id)} className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold" title="Hapus Riwayat">
-                                        <i className="fas fa-trash"></i>
-                                      </button>
                                     </div>
                                   </td>
                                 </tr>
@@ -1869,7 +2055,7 @@
                 </div>
               )}
 
-              {/* Financial & Stock Reports Tab */}
+              {}
               {activeTab === 'reports' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1882,7 +2068,7 @@
                       <select
                         value={reportPeriod}
                         onChange={(e) => setReportPeriod(e.target.value)}
-                        className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold bg-white"
+                        className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold bg-white text-slate-700"
                       >
                         <option value="all">Semua Waktu</option>
                         <option value="monthly">Laporan Bulanan</option>
@@ -1894,7 +2080,7 @@
                           type="month"
                           value={reportMonth}
                           onChange={(e) => setReportMonth(e.target.value)}
-                          className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
+                          className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
                         />
                       )}
 
@@ -1902,7 +2088,7 @@
                         <select
                           value={reportYear}
                           onChange={(e) => setReportYear(e.target.value)}
-                          className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
+                          className="px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold bg-white text-slate-700"
                         >
                           <option value="2026">Tahun 2026</option>
                           <option value="2025">Tahun 2025</option>
@@ -1967,7 +2153,7 @@
                 </div>
               )}
 
-              {/* Store & Admin Account Settings Tab */}
+              {}
               {activeTab === 'settings' && isAdminLoggedIn && (
                 <div className="space-y-4">
                   <div className="bg-white p-4 rounded-2xl border border-slate-200">
@@ -2141,6 +2327,7 @@
             </div>
           </main>
 
+          {}
           {/* Modal Admin Login */}
           {isLoginModalOpen && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -2389,7 +2576,102 @@
             </div>
           )}
 
-          {/* Thermal Receipt Preview Modal (Pratinjau Struk) */}
+          {/* Import Excel / CSV Modal */}
+          {isImportModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+                <div className="p-4 bg-slate-900 text-white flex justify-between items-center shrink-0">
+                  <div className="flex items-center gap-2">
+                    <i className="fas fa-file-excel text-emerald-400 text-lg"></i>
+                    <div>
+                      <h3 className="font-bold text-base">Import Produk dari Excel / CSV</h3>
+                      <p className="text-[11px] text-slate-400">Tambah atau perbarui banyak produk sekaligus secara massal.</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setIsImportModalOpen(false)} className="text-slate-400 hover:text-white text-xl">&times;</button>
+                </div>
+
+                <div className="p-5 overflow-y-auto space-y-4 flex-1">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3.5 bg-slate-50 border border-slate-200 rounded-xl gap-3">
+                    <div>
+                      <span className="font-bold text-slate-800 text-xs block">1. Belum memiliki format file?</span>
+                      <span className="text-[11px] text-slate-500">Unduh template Excel resmi untuk mempermudah penyusunan kolom data.</span>
+                    </div>
+                    <button
+                      onClick={downloadSampleTemplate}
+                      className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shrink-0 shadow-sm"
+                    >
+                      <i className="fas fa-download"></i> Unduh Template Excel
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">2. Pilih File Excel / Spreadsheet (.xlsx, .xls, .csv)</label>
+                    <input
+                      type="file"
+                      accept=".xlsx, .xls, .csv"
+                      onChange={handleExcelFileUpload}
+                      className="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-slate-900 file:text-white hover:file:bg-slate-800 cursor-pointer border border-slate-200 rounded-xl p-1 bg-white"
+                    />
+                    {importFileName && <span className="text-[11px] text-emerald-600 font-bold block mt-1"><i className="fas fa-file-alt mr-1"></i> File dipilih: {importFileName}</span>}
+                  </div>
+
+                  {importPreviewData.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-xs text-slate-800"><i className="fas fa-list-check text-emerald-600 mr-1"></i> Pratinjau Data ({importPreviewData.length} Item Siap Di-import):</span>
+                      </div>
+                      <div className="overflow-x-auto max-h-56 rounded-xl border border-slate-200">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold uppercase">
+                            <tr>
+                              <th className="p-2.5">SKU</th>
+                              <th className="p-2.5">Nama Produk</th>
+                              <th className="p-2.5">Kategori</th>
+                              <th className="p-2.5 text-right">Modal</th>
+                              <th className="p-2.5 text-right">Jual</th>
+                              <th className="p-2.5 text-center">Stok</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {importPreviewData.map((p, idx) => (
+                              <tr key={idx} className="hover:bg-slate-50">
+                                <td className="p-2.5 font-mono font-bold text-slate-700">{p.sku}</td>
+                                <td className="p-2.5 font-bold text-slate-800">{p.name}</td>
+                                <td className="p-2.5"><span className="px-2 py-0.5 bg-slate-100 text-slate-700 font-semibold rounded-md text-[10px]">{p.category}</span></td>
+                                <td className="p-2.5 text-right text-slate-500">{formatRupiah(p.buyPrice)}</td>
+                                <td className="p-2.5 text-right font-bold text-emerald-600">{formatRupiah(p.sellPrice)}</td>
+                                <td className="p-2.5 text-center font-bold">{p.stock}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
+                  <button
+                    onClick={() => setIsImportModalOpen(false)}
+                    className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={processBulkImport}
+                    disabled={importPreviewData.length === 0}
+                    className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-1.5"
+                  >
+                    <i className="fas fa-file-import"></i>
+                    <span>Proses Import ({importPreviewData.length} Produk)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Thermal Receipt Preview Modal */}
           {isReceiptModalOpen && currentTxToPrint && (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
@@ -2454,7 +2736,7 @@
                   </button>
                   <button onClick={printThermalReceipt} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center justify-center gap-1.5">
                     <i className="fas fa-print"></i>
-                    <span>Cetak Struk POS58B</span>
+                    <span>Cetak Struk</span>
                   </button>
                 </div>
               </div>
