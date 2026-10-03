@@ -225,8 +225,10 @@
           unsubSettings = db.collection('settings').doc('store_settings').onSnapshot(
             doc => {
               if (doc.exists) {
-                setSettings(doc.data());
-                setSettingsForm(doc.data());
+                const data = doc.data();
+                const mergedSettings = { ...DEFAULT_SETTINGS, ...data };
+                setSettings(mergedSettings);
+                setSettingsForm(mergedSettings);
               } else {
                 db.collection('settings').doc('store_settings').set(DEFAULT_SETTINGS).catch(() => {});
               }
@@ -759,10 +761,15 @@
 
       const handleSaveSettings = (e) => {
         e.preventDefault();
+        const updatedSettings = {
+          ...DEFAULT_SETTINGS,
+          ...settingsForm,
+          id: 'store_settings'
+        };
         if (isFirebaseReady && db) {
-          db.collection('settings').doc('store_settings').set(settingsForm).catch(e => console.warn("Settings write error:", e));
+          db.collection('settings').doc('store_settings').set(updatedSettings).catch(e => console.warn("Settings write error:", e));
         }
-        setSettings(settingsForm);
+        setSettings(updatedSettings);
         showToast('Pengaturan Toko Berhasil Disimpan!');
       };
 
@@ -2377,9 +2384,9 @@
                 <div className="p-4 overflow-y-auto bg-slate-100 flex-1">
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 font-mono text-xs text-slate-900 space-y-3">
                     <div className="text-center">
-                      <div className="font-bold text-sm">{settings.name}</div>
-                      <div className="text-[10px] text-slate-600">{settings.address}</div>
-                      <div className="text-[10px] text-slate-600">Telp/WA: {settings.phone}</div>
+                      <div className="font-bold text-sm">{settings.name || 'Warung Aqilla'}</div>
+                      <div className="text-[10px] text-slate-600">{settings.address || 'Jl. Raya Utama No. 123'}</div>
+                      <div className="text-[10px] text-slate-600">Telp/WA: {settings.phone || '-'}</div>
                     </div>
                     <div className="border-t border-dashed border-slate-400 my-1"></div>
                     <div className="text-[10px] space-y-0.5">
@@ -2471,9 +2478,9 @@
             <div id="printable-thermal-receipt" className="hidden">
               <div style={{ width: settings.paperWidth === '80mm' ? '76mm' : '54mm', margin: '0 auto', padding: '8px', fontFamily: 'monospace', fontSize: '11px', lineHeight: '1.2' }}>
                 <div style={{ textAlign: 'center', marginBottom: '8px' }}>
-                  <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{settings.name}</div>
-                  <div style={{ fontSize: '10px' }}>{settings.address}</div>
-                  <div style={{ fontSize: '10px' }}>Telp/WA: {settings.phone}</div>
+                  <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{settings.name || 'Warung Aqilla'}</div>
+                  <div style={{ fontSize: '10px' }}>{settings.address || 'Jl. Raya Utama No. 123'}</div>
+                  <div style={{ fontSize: '10px' }}>Telp/WA: {settings.phone || '-'}</div>
                 </div>
                 <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }}></div>
                 <div style={{ fontSize: '10px', marginBottom: '6px' }}>
