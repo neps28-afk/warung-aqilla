@@ -93,8 +93,19 @@
     };
 
     function App() {
-      const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
-      const [activeTab, setActiveTab] = useState('pos');
+      const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
+        return localStorage.getItem('aqilla_isAdminLoggedIn') === 'true';
+      });
+
+      const [activeTab, setActiveTab] = useState(() => {
+        const savedTab = localStorage.getItem('aqilla_activeTab');
+        const protectedTabs = ['pending', 'products', 'opname', 'history', 'reports', 'settings'];
+        const savedIsAdmin = localStorage.getItem('aqilla_isAdminLoggedIn') === 'true';
+        if (protectedTabs.includes(savedTab) && !savedIsAdmin) {
+          return 'pos';
+        }
+        return savedTab || 'pos';
+      });
 
       // Main Data Collections
       const [products, setProducts] = useState(DEFAULT_PRODUCTS);
@@ -178,6 +189,14 @@
 
       // Toast Notifications
       const [toast, setToast] = useState({ show: false, message: '', isError: false });
+
+      useEffect(() => {
+        localStorage.setItem('aqilla_isAdminLoggedIn', isAdminLoggedIn);
+      }, [isAdminLoggedIn]);
+
+      useEffect(() => {
+        localStorage.setItem('aqilla_activeTab', activeTab);
+      }, [activeTab]);
 
       useEffect(() => {
         if (!isFirebaseReady || !db || !auth) return;
